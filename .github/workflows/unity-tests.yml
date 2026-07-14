@@ -3,6 +3,7 @@ name: Repository Validation
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -23,16 +24,221 @@ jobs:
           find Assets Packages -type f \( -name '*.json' -o -name '*.asmdef' \) -print0 \
             | xargs -0 -n1 jq empty
 
+      - name: Validate tracked benchmark evidence
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          benchmark_path = Path("BenchmarkResults/latest.json")
+          markdown_path = Path("BenchmarkResults/latest.md")
+          matrix_path = Path("BenchmarkResults/spatial-index-matrix.json")
+          matrix_markdown_path = Path("BenchmarkResults/spatial-index-matrix.md")
+          project_version_path = Path("ProjectSettings/ProjectVersion.txt")
+
+          evidence_paths = (
+              benchmark_path,
+              markdown_path,
+              matrix_path,
+              matrix_markdown_path,
+          )
+          missing_files = [str(path) for path in evidence_paths if not path.is_file()]
+          if missing_files:
+              raise SystemExit(f"Tracked benchmark evidence is missing: {missing_files}")
+
+          benchmark = json.loads(benchmark_path.read_text(encoding="utf-8"))
+          required = {
+              "unityVersion",
+              "timestampUtc",
+              "processor",
+              "processorCount",
+              "graphicsDevice",
+              "agents",
+              "warmupTicks",
+              "sampleTicks",
+              "averageMilliseconds",
+              "p95Milliseconds",
+              "minMilliseconds",
+              "maxMilliseconds",
+              "managedBytesAcrossSamples",
+              "spatialIndex",
+              "avoidanceExecution",
+              "backgroundWorkersUsed",
+              "stateHash",
+              "canonicalSpatialComparisonHash",
+          }
+          missing = sorted(required.difference(benchmark))
+          if missing:
+              raise SystemExit(f"Benchmark is missing required fields: {missing}")
+
+          project_version = project_version_path.read_text(encoding="utf-8")
+          if benchmark["unityVersion"] not in project_version:
+              raise SystemExit("Benchmark Unity version does not match ProjectVersion.txt")
+          expected_run = {
+              "agents": 10000,
+              "warmupTicks": 8,
+              "sampleTicks": 32,
+              "graphicsDevice": "Null Device",
+              "spatialIndex": "UniformGrid",
+          }
+          for field, expected in expected_run.items():
+              if benchmark[field] != expected:
+                  raise SystemExit(
+                      f"Benchmark {field} mismatch: expected {expected!r}, "
+                      f"got {benchmark[field]!r}."
+                  )
+          if benchmark["averageMilliseconds"] <= 0 or benchmark["p95Milliseconds"] <= 0:
+              raise SystemExit("Benchmark timing must be positive.")
+          if benchmark["managedBytesAcrossSamples"] != 0:
+              raise SystemExit("Tracked benchmark must preserve zero current-thread allocation.")
+
+          hash_pattern = re.compile(r"^0x[0-9A-F]{16}$")
+          for field in ("stateHash", "canonicalSpatialComparisonHash"):
+              if not hash_pattern.fullmatch(str(benchmark[field])):
+                  raise SystemExit(f"Benchmark {field} must be an uppercase 64-bit hex value.")
+
+          matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+          matrix_required = {
+              "unityVersion",
+              "timestampUtc",
+              "processor",
+              "processorCount",
+              "graphicsDevice",
+              "agents",
+              "warmupTicks",
+              "sampleTicks",
+              "formationSeed",
+              "fixedDeltaTimeRaw",
+              "neighborDistanceRaw",
+              "maxNeighbors",
+              "runOrder",
+              "results",
+          }
+          matrix_missing = sorted(matrix_required.difference(matrix))
+          if matrix_missing:
+              raise SystemExit(f"Spatial matrix is missing required fields: {matrix_missing}")
+
+          expected_modes = ["UniformGrid", "KdTreeRadius", "KdTreeKNearest"]
+          if matrix["runOrder"] != expected_modes:
+              raise SystemExit(f"Unexpected spatial matrix runOrder: {matrix['runOrder']}")
+          if len(matrix["results"]) != len(expected_modes):
+              raise SystemExit("Spatial matrix must contain exactly one result per runtime mode.")
+          if matrix["unityVersion"] not in project_version:
+              raise SystemExit("Spatial matrix Unity version does not match ProjectVersion.txt")
+          expected_matrix_settings = {
+              "agents": 10000,
+              "warmupTicks": 8,
+              "sampleTicks": 32,
+              "graphicsDevice": "Null Device",
+              "formationSeed": "0x5EED1234",
+              "fixedDeltaTimeRaw": 2184,
+              "neighborDistanceRaw": 262144,
+              "maxNeighbors": 8,
+          }
+          for field, expected in expected_matrix_settings.items():
+              if matrix[field] != expected:
+                  raise SystemExit(
+                      f"Spatial matrix {field} mismatch: expected {expected!r}, "
+                      f"got {matrix[field]!r}."
+                  )
+
+          for expected_mode, result in zip(expected_modes, matrix["results"]):
+              result_missing = sorted(required.difference(result))
+              if result_missing:
+                  raise SystemExit(
+                      f"Spatial matrix result {expected_mode} is missing fields: {result_missing}"
+                  )
+              if result["spatialIndex"] != expected_mode:
+                  raise SystemExit(
+                      f"Spatial matrix order mismatch: expected {expected_mode}, "
+                      f"got {result['spatialIndex']}"
+                  )
+              for common_field in ("unityVersion", "agents", "warmupTicks", "sampleTicks"):
+                  if result[common_field] != matrix[common_field]:
+                      raise SystemExit(
+                          f"Spatial matrix {expected_mode} mismatches top-level {common_field}."
+                      )
+              if result["averageMilliseconds"] <= 0 or result["p95Milliseconds"] <= 0:
+                  raise SystemExit(f"Spatial matrix {expected_mode} timing must be positive.")
+              if result["managedBytesAcrossSamples"] != 0:
+                  raise SystemExit(
+                      f"Spatial matrix {expected_mode} must preserve zero current-thread allocation."
+                  )
+              for field in ("stateHash", "canonicalSpatialComparisonHash"):
+                  if not hash_pattern.fullmatch(str(result[field])):
+                      raise SystemExit(
+                          f"Spatial matrix {expected_mode} has an invalid {field}."
+                      )
+
+          grid_canonical = matrix["results"][0]["canonicalSpatialComparisonHash"]
+          kd_radius_canonical = matrix["results"][1]["canonicalSpatialComparisonHash"]
+          if grid_canonical != kd_radius_canonical:
+              raise SystemExit(
+                  "UniformGrid and KdTreeRadius canonical comparison hashes must match."
+              )
+          grid_result = matrix["results"][0]
+          if grid_result["stateHash"] != benchmark["stateHash"]:
+              raise SystemExit("Single and matrix UniformGrid full state hashes must match.")
+          if grid_result["canonicalSpatialComparisonHash"] != benchmark["canonicalSpatialComparisonHash"]:
+              raise SystemExit("Single and matrix UniformGrid canonical hashes must match.")
+
+          benchmark_markdown = markdown_path.read_text(encoding="utf-8")
+          matrix_markdown = matrix_markdown_path.read_text(encoding="utf-8")
+          for value in (benchmark["stateHash"], benchmark["canonicalSpatialComparisonHash"]):
+              if value not in benchmark_markdown:
+                  raise SystemExit(f"latest.md is missing benchmark value {value}.")
+          for result in matrix["results"]:
+              for value in (result["stateHash"], result["canonicalSpatialComparisonHash"]):
+                  if value not in matrix_markdown:
+                      raise SystemExit(f"spatial-index-matrix.md is missing matrix value {value}.")
+          PY
+
+      - name: Validate release documentation
+        shell: bash
+        run: |
+          test -f README.md
+          test -f CHANGELOG.md
+          test -f Docs/ROADMAP_2027.md
+          test -f Docs/RELEASE_CHECKLIST.md
+          test -f Docs/BENCHMARKING.md
+          test -x Scripts/run-spatial-index-benchmark-matrix.sh
+          bash -n Scripts/run-spatial-index-benchmark-matrix.sh
+
       - name: Reject generated Unity folders
         shell: bash
         run: |
-          if git ls-files | grep -E '^(Library|Temp|Builds|Logs|UserSettings)/'; then
+          if git ls-files | grep -E '^(Library|Temp|Obj|Build|Builds|Logs|UserSettings|MemoryCaptures|Recordings|TestResults)/'; then
             echo 'Generated Unity folders must not be committed.' >&2
             exit 1
           fi
+          if git ls-files | grep -E '^(HybridCLRData/(LocalIl2CppData-|HotUpdateDlls|AssembliesPostIl2CppStrip)|Bundles|ServerData)/'; then
+            echo 'Generated HybridCLR/YooAsset outputs must not be committed.' >&2
+            exit 1
+          fi
+
+      - name: Upload tracked release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence-${{ github.sha }}
+          path: |
+            BenchmarkResults/latest.json
+            BenchmarkResults/latest.md
+            BenchmarkResults/spatial-index-matrix.json
+            BenchmarkResults/spatial-index-matrix.md
+            ProjectSettings/ProjectVersion.txt
+            README.md
+            CHANGELOG.md
+            Docs/ROADMAP_2027.md
+            Docs/RELEASE_CHECKLIST.md
+            Docs/BENCHMARKING.md
+            Scripts/run-spatial-index-benchmark-matrix.sh
+          if-no-files-found: error
+          retention-days: 30
 
   editmode:
-    name: EditMode / Unity 6000.3.9f1
+    name: EditMode / Unity 6000.3.9f1 (optional licensed runner)
     if: ${{ vars.UNITY_CI_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
