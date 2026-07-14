@@ -1,0 +1,25 @@
+# Swarm ECS benchmark
+
+- UTC: 2026-07-14T14:07:44.6104370Z
+- Unity: 6000.3.9f1
+- CPU: Apple M5 Pro (15 logical cores)
+- GPU: Null Device
+- Agents: 10,000
+- Spatial index: UniformGrid
+- Avoidance execution: Caller + 14 background workers
+- Path requests/tick: 1
+- Path cache capacity: 68
+- Navigation islands/shared waypoints: 1/248
+- Sample-total ORCA obstacle/agent lines: 151175/9596585
+- Sample-total avoidance/collision BVH queries: 1200000/1200174
+- Sample-total collision candidates / CCD hits / SAT fallback: 174/86/0
+- Maximum residual penetration in samples (Q16.16 raw): 0
+- Sample-total acceleration/turn limited agents: 104117/147498
+- Warmup/sample ticks: 200/120
+- Average: 18.979 ms/tick
+- P95: 20.714 ms/tick
+- Min/max: 17.597/26.217 ms
+- Current-thread managed allocation across samples: 0 B
+- Immutable config hash: `0x90EFFCAE3189FF28`
+- Final full state hash: `0xDCDC7AC9B68A8CA2`
+- Canonical spatial comparison hash: `0xDCDC7AC9B68A8CA2`

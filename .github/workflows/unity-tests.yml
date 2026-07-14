@@ -36,6 +36,8 @@ jobs:
           markdown_path = Path("BenchmarkResults/latest.md")
           matrix_path = Path("BenchmarkResults/spatial-index-matrix.json")
           matrix_markdown_path = Path("BenchmarkResults/spatial-index-matrix.md")
+          obstacle_path = Path("BenchmarkResults/obstacle-approach/latest.json")
+          obstacle_markdown_path = Path("BenchmarkResults/obstacle-approach/latest.md")
           project_version_path = Path("ProjectSettings/ProjectVersion.txt")
 
           evidence_paths = (
@@ -43,6 +45,8 @@ jobs:
               markdown_path,
               matrix_path,
               matrix_markdown_path,
+              obstacle_path,
+              obstacle_markdown_path,
           )
           missing_files = [str(path) for path in evidence_paths if not path.is_file()]
           if missing_files:
@@ -66,6 +70,17 @@ jobs:
               "spatialIndex",
               "avoidanceExecution",
               "backgroundWorkersUsed",
+              "sampleObstacleOrcaLines",
+              "sampleAgentOrcaLines",
+              "sampleAvoidanceObstacleBvhQueries",
+              "sampleCollisionBvhQueries",
+              "sampleCollisionBvhCandidates",
+              "sampleCcdSweepHits",
+              "sampleSatFallbackRecoveries",
+              "maxResidualPenetrationRaw",
+              "sampleAccelerationLimitedAgents",
+              "sampleTurnLimitedAgents",
+              "configHash",
               "stateHash",
               "canonicalSpatialComparisonHash",
           }
@@ -95,9 +110,25 @@ jobs:
               raise SystemExit("Tracked benchmark must preserve zero current-thread allocation.")
 
           hash_pattern = re.compile(r"^0x[0-9A-F]{16}$")
-          for field in ("stateHash", "canonicalSpatialComparisonHash"):
+          for field in ("configHash", "stateHash", "canonicalSpatialComparisonHash"):
               if not hash_pattern.fullmatch(str(benchmark[field])):
                   raise SystemExit(f"Benchmark {field} must be an uppercase 64-bit hex value.")
+
+          counter_fields = (
+              "sampleObstacleOrcaLines",
+              "sampleAgentOrcaLines",
+              "sampleAvoidanceObstacleBvhQueries",
+              "sampleCollisionBvhQueries",
+              "sampleCollisionBvhCandidates",
+              "sampleCcdSweepHits",
+              "sampleSatFallbackRecoveries",
+              "maxResidualPenetrationRaw",
+              "sampleAccelerationLimitedAgents",
+              "sampleTurnLimitedAgents",
+          )
+          for field in counter_fields:
+              if not isinstance(benchmark[field], int) or benchmark[field] < 0:
+                  raise SystemExit(f"Benchmark {field} must be a non-negative integer.")
 
           matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
           matrix_required = {
@@ -166,8 +197,13 @@ jobs:
                   raise SystemExit(
                       f"Spatial matrix {expected_mode} must preserve zero current-thread allocation."
                   )
-              for field in ("stateHash", "canonicalSpatialComparisonHash"):
+              for field in ("configHash", "stateHash", "canonicalSpatialComparisonHash"):
                   if not hash_pattern.fullmatch(str(result[field])):
+                      raise SystemExit(
+                          f"Spatial matrix {expected_mode} has an invalid {field}."
+                      )
+              for field in counter_fields:
+                  if not isinstance(result[field], int) or result[field] < 0:
                       raise SystemExit(
                           f"Spatial matrix {expected_mode} has an invalid {field}."
                       )
@@ -186,13 +222,190 @@ jobs:
 
           benchmark_markdown = markdown_path.read_text(encoding="utf-8")
           matrix_markdown = matrix_markdown_path.read_text(encoding="utf-8")
-          for value in (benchmark["stateHash"], benchmark["canonicalSpatialComparisonHash"]):
+          for value in (
+              benchmark["configHash"],
+              benchmark["stateHash"],
+              benchmark["canonicalSpatialComparisonHash"],
+          ):
               if value not in benchmark_markdown:
                   raise SystemExit(f"latest.md is missing benchmark value {value}.")
           for result in matrix["results"]:
-              for value in (result["stateHash"], result["canonicalSpatialComparisonHash"]):
+              for value in (
+                  result["configHash"],
+                  result["stateHash"],
+                  result["canonicalSpatialComparisonHash"],
+              ):
                   if value not in matrix_markdown:
                       raise SystemExit(f"spatial-index-matrix.md is missing matrix value {value}.")
+
+          obstacle = json.loads(obstacle_path.read_text(encoding="utf-8"))
+          obstacle_missing = sorted(required.difference(obstacle))
+          if obstacle_missing:
+              raise SystemExit(f"Obstacle-approach result is missing fields: {obstacle_missing}")
+          expected_obstacle_run = {
+              "unityVersion": "6000.3.9f1",
+              "agents": 10000,
+              "warmupTicks": 200,
+              "sampleTicks": 120,
+              "graphicsDevice": "Null Device",
+              "spatialIndex": "UniformGrid",
+          }
+          for field, expected in expected_obstacle_run.items():
+              if obstacle[field] != expected:
+                  raise SystemExit(
+                      f"Obstacle-approach {field} mismatch: expected {expected!r}, "
+                      f"got {obstacle[field]!r}."
+                  )
+          if obstacle["averageMilliseconds"] <= 0 or obstacle["p95Milliseconds"] <= 0:
+              raise SystemExit("Obstacle-approach timing must be positive.")
+          if obstacle["managedBytesAcrossSamples"] != 0:
+              raise SystemExit("Obstacle-approach must preserve zero current-thread allocation.")
+          for field in ("configHash", "stateHash", "canonicalSpatialComparisonHash"):
+              if not hash_pattern.fullmatch(str(obstacle[field])):
+                  raise SystemExit(f"Obstacle-approach {field} has an invalid format.")
+          for field in counter_fields:
+              if not isinstance(obstacle[field], int) or obstacle[field] < 0:
+                  raise SystemExit(f"Obstacle-approach {field} must be a non-negative integer.")
+          if obstacle["sampleObstacleOrcaLines"] <= 0:
+              raise SystemExit("Obstacle-approach must exercise static obstacle ORCA lines.")
+          if obstacle["sampleCollisionBvhCandidates"] <= 0 or obstacle["sampleCcdSweepHits"] <= 0:
+              raise SystemExit("Obstacle-approach must exercise collision BVH candidates and CCD.")
+          if obstacle["sampleSatFallbackRecoveries"] != 0 or obstacle["maxResidualPenetrationRaw"] != 0:
+              raise SystemExit("Tracked obstacle-approach evidence must not rely on SAT fallback or retain penetration.")
+          obstacle_markdown = obstacle_markdown_path.read_text(encoding="utf-8")
+          for value in (
+              obstacle["configHash"],
+              obstacle["stateHash"],
+              obstacle["canonicalSpatialComparisonHash"],
+          ):
+              if value not in obstacle_markdown:
+                  raise SystemExit(f"Obstacle-approach latest.md is missing value {value}.")
+          PY
+
+      - name: Validate tracked cross-process replay evidence
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import re
+          from pathlib import Path
+
+          replay_path = Path("ReplayResults/cross-process.swarmreplay")
+          capture_path = Path("ReplayResults/capture.json")
+          verify_path = Path("ReplayResults/verify.json")
+          markdown_path = Path("ReplayResults/latest.md")
+          identity_path = Path("Assets/SwarmSandbox/Simulation/Replay/SimulationBuildIdentity.cs")
+          evidence_paths = (replay_path, capture_path, verify_path, markdown_path)
+          missing = [str(path) for path in evidence_paths if not path.is_file()]
+          if missing:
+              raise SystemExit(f"Tracked replay evidence is missing: {missing}")
+
+          capture = json.loads(capture_path.read_text(encoding="utf-8"))
+          verify = json.loads(verify_path.read_text(encoding="utf-8"))
+          hash_pattern = re.compile(r"^0x[0-9A-F]{16}$")
+          sha_pattern = re.compile(r"^[0-9A-Fa-f]{64}$")
+
+          replay_sha = hashlib.sha256(replay_path.read_bytes()).hexdigest().upper()
+          identity_match = re.search(
+              r"CurrentLogicHash\s*=\s*0x([0-9A-Fa-f]{16})UL",
+              identity_path.read_text(encoding="utf-8"),
+          )
+          if identity_match is None:
+              raise SystemExit("SimulationBuildIdentity.CurrentLogicHash could not be parsed.")
+          source_logic_hash = "0x" + identity_match.group(1).upper()
+          if capture.get("replayFile") != replay_path.name:
+              raise SystemExit("Capture report replayFile does not match the tracked replay name.")
+          if capture.get("replayBytes") != replay_path.stat().st_size:
+              raise SystemExit("Capture report replayBytes does not match the tracked replay size.")
+          if not isinstance(capture.get("replaySchemaVersion"), int) or capture["replaySchemaVersion"] <= 0:
+              raise SystemExit("Capture replay schema version must be a positive integer.")
+          expected_workload = {
+              "agents": 256,
+              "commands": 5,
+              "checkpoints": 5,
+              "finalTick": 120,
+          }
+          for field, expected in expected_workload.items():
+              if capture.get(field) != expected:
+                  raise SystemExit(
+                      f"Replay workload {field} mismatch: expected {expected!r}, "
+                      f"got {capture.get(field)!r}."
+                  )
+          if verify.get("finalTick") != capture["finalTick"]:
+              raise SystemExit("Capture and verify final ticks differ.")
+          if not sha_pattern.fullmatch(str(capture.get("replaySha256", ""))):
+              raise SystemExit("Capture replay SHA-256 has an invalid format.")
+          if replay_sha != capture["replaySha256"].upper():
+              raise SystemExit("Capture replay SHA-256 does not match the tracked replay.")
+          if capture["replaySha256"] != verify.get("replaySha256"):
+              raise SystemExit("Capture and verify replay SHA-256 values differ.")
+
+          if capture.get("processId") == verify.get("verifyProcessId"):
+              raise SystemExit("Replay capture and verification must use different process IDs.")
+          if verify.get("captureProcessId") != capture.get("processId"):
+              raise SystemExit("Verify report does not reference the capture process ID.")
+          if verify.get("independentProcess") is not True:
+              raise SystemExit("Replay evidence must report independentProcess=true.")
+          if verify.get("crcAndSchemaValidated") is not True:
+              raise SystemExit("Replay schema/integrity validation is not recorded as successful.")
+          if verify.get("allCheckpointsMatched") is not True:
+              raise SystemExit("Replay checkpoints did not all match.")
+          if verify.get("matchedCheckpoints") != capture.get("checkpoints"):
+              raise SystemExit("Replay matched checkpoint count is inconsistent.")
+
+          for field in ("logicHash", "configHash"):
+              capture_value = str(capture.get(field, ""))
+              verify_value = str(verify.get(field, ""))
+              if not hash_pattern.fullmatch(capture_value):
+                  raise SystemExit(f"Capture {field} is not an uppercase 64-bit hex value.")
+              if capture_value != verify_value:
+                  raise SystemExit(f"Capture and verify {field} values differ.")
+          if capture["logicHash"] != source_logic_hash:
+              raise SystemExit(
+                  "Tracked replay logicHash does not match SimulationBuildIdentity."
+              )
+
+          layer_fields = (
+              "config",
+              "worldMetadata",
+              "groupTargets",
+              "groupPathStates",
+              "navigationRequestSequence",
+              "agentPositions",
+              "agentVelocities",
+              "agentPathCursors",
+              "full",
+          )
+          capture_layers = capture.get("finalAuthorityHashes", {})
+          verify_layers = verify.get("finalAuthorityHashes", {})
+          for field in layer_fields:
+              value = str(capture_layers.get(field, ""))
+              if not hash_pattern.fullmatch(value):
+                  raise SystemExit(f"Capture authority layer {field} has an invalid hash.")
+              if value != verify_layers.get(field):
+                  raise SystemExit(f"Capture and verify authority layer {field} differ.")
+
+          probe = verify.get("desyncProbe", {})
+          expected_probe = {
+              "component": "AgentPositions",
+              "entityIndex": 0,
+              "field": "X.Raw",
+              "rawKind": "Int32",
+          }
+          for field, expected in expected_probe.items():
+              if probe.get(field) != expected:
+                  raise SystemExit(
+                      f"Replay desync probe {field} mismatch: expected {expected!r}, "
+                      f"got {probe.get(field)!r}."
+                  )
+          if probe.get("expectedRaw") == probe.get("actualRaw"):
+              raise SystemExit("Replay desync probe raw values must differ.")
+
+          markdown = markdown_path.read_text(encoding="utf-8")
+          for value in (capture["replaySha256"], capture_layers["full"]):
+              if value not in markdown:
+                  raise SystemExit(f"Replay latest.md is missing value {value}.")
           PY
 
       - name: Validate release documentation
@@ -203,8 +416,123 @@ jobs:
           test -f Docs/ROADMAP_2027.md
           test -f Docs/RELEASE_CHECKLIST.md
           test -f Docs/BENCHMARKING.md
+          test -f Docs/ARCHITECTURE.md
+          test -f Docs/DETERMINISM_AND_NETCODE.md
+          test -f Docs/TECHNICAL_WALKTHROUGH.md
+          test -f Docs/RELEASE_NOTES_v0.3.0.md
+          test -f Docs/COMMERCIAL_PIPELINE.md
+          test -f THIRD_PARTY_NOTICES.md
+          test -f LICENSES/Apache-2.0.txt
+          grep -q '^  bundleVersion: 0.3.0$' ProjectSettings/ProjectSettings.asset
           test -x Scripts/run-spatial-index-benchmark-matrix.sh
+          test -x Scripts/run-cross-process-replay.sh
           bash -n Scripts/run-spatial-index-benchmark-matrix.sh
+          bash -n Scripts/run-cross-process-replay.sh
+
+      - name: Validate Unity metadata and public repository hygiene
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import ipaddress
+          import re
+          import subprocess
+          from pathlib import Path
+
+          assets = Path("Assets")
+          missing_meta = []
+          orphan_meta = []
+          guid_owners = {}
+          invalid_guid = []
+          guid_pattern = re.compile(r"^guid:\s*([0-9a-f]{32})\s*$", re.MULTILINE)
+
+          for path in assets.rglob("*"):
+              if path.name.startswith("."):
+                  continue
+              if path.suffix == ".meta":
+                  source = Path(str(path)[:-5])
+                  if not source.exists():
+                      orphan_meta.append(str(path))
+                  text = path.read_text(encoding="utf-8")
+                  match = guid_pattern.search(text)
+                  if match is None:
+                      invalid_guid.append(str(path))
+                  else:
+                      guid_owners.setdefault(match.group(1), []).append(str(path))
+                  continue
+
+              meta = Path(str(path) + ".meta")
+              if not meta.is_file():
+                  missing_meta.append(str(path))
+
+          duplicate_guids = {
+              guid: owners for guid, owners in guid_owners.items() if len(owners) > 1
+          }
+          if missing_meta or orphan_meta or invalid_guid or duplicate_guids:
+              raise SystemExit(
+                  "Unity metadata validation failed: "
+                  f"missing={missing_meta}, orphan={orphan_meta}, "
+                  f"invalidGuid={invalid_guid}, duplicateGuid={duplicate_guids}"
+              )
+
+          tracked = subprocess.check_output(
+              ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"]
+          ).split(b"\0")
+          career_tokens = (
+              "inter" + "view",
+              "port" + "folio",
+              chr(0x9762) + chr(0x8BD5),
+              chr(0x7B80) + chr(0x5386),
+              chr(0x6C42) + chr(0x804C),
+              chr(0x5C97) + chr(0x4F4D),
+              chr(0x4F5C) + chr(0x54C1) + chr(0x96C6),
+              chr(0x5927) + chr(0x5382),
+              chr(0x62DB) + chr(0x8058),
+              chr(0x7ADE) + chr(0x4E89) + chr(0x529B),
+          )
+          local_tokens = (
+              "/" + "Users/",
+              "/" + "Volumes/",
+              "san" + "wuwei",
+          )
+          private_ipv4 = re.compile(
+              r"(?<![0-9])(?:10(?:\.[0-9]{1,3}){3}|"
+              r"192\.168(?:\.[0-9]{1,3}){2}|"
+              r"172\.(?:1[6-9]|2[0-9]|3[01])(?:\.[0-9]{1,3}){2})(?![0-9])"
+          )
+          violations = []
+          for raw_path in tracked:
+              if not raw_path:
+                  continue
+              path = Path(raw_path.decode("utf-8"))
+              if not path.is_file():
+                  continue
+              path_text = str(path)
+              lower_path = path_text.lower()
+              for token in career_tokens:
+                  if token.lower() in lower_path:
+                      violations.append(f"career wording in path: {path_text}")
+              try:
+                  content = path.read_text(encoding="utf-8")
+              except (UnicodeDecodeError, OSError):
+                  continue
+              lower_content = content.lower()
+              for token in career_tokens:
+                  if token.lower() in lower_content:
+                      violations.append(f"career wording in file: {path_text}")
+              for token in local_tokens:
+                  if token.lower() in lower_content:
+                      violations.append(f"local identity/path in file: {path_text}")
+              for match in private_ipv4.finditer(content):
+                  try:
+                      address = ipaddress.ip_address(match.group(0))
+                  except ValueError:
+                      continue
+                  if address.is_private:
+                      violations.append(f"private address in file: {path_text}")
+
+          if violations:
+              raise SystemExit("Public repository hygiene failed: " + "; ".join(violations))
+          PY
 
       - name: Reject generated Unity folders
         shell: bash
@@ -227,13 +555,27 @@ jobs:
             BenchmarkResults/latest.md
             BenchmarkResults/spatial-index-matrix.json
             BenchmarkResults/spatial-index-matrix.md
+            BenchmarkResults/obstacle-approach/latest.json
+            BenchmarkResults/obstacle-approach/latest.md
+            ReplayResults/cross-process.swarmreplay
+            ReplayResults/capture.json
+            ReplayResults/verify.json
+            ReplayResults/latest.md
             ProjectSettings/ProjectVersion.txt
             README.md
             CHANGELOG.md
+            THIRD_PARTY_NOTICES.md
+            LICENSES/Apache-2.0.txt
+            Docs/ARCHITECTURE.md
+            Docs/DETERMINISM_AND_NETCODE.md
             Docs/ROADMAP_2027.md
             Docs/RELEASE_CHECKLIST.md
+            Docs/RELEASE_NOTES_v0.3.0.md
+            Docs/TECHNICAL_WALKTHROUGH.md
             Docs/BENCHMARKING.md
+            Docs/COMMERCIAL_PIPELINE.md
             Scripts/run-spatial-index-benchmark-matrix.sh
+            Scripts/run-cross-process-replay.sh
           if-no-files-found: error
           retention-days: 30
 

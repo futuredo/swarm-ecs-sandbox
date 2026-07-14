@@ -1,40 +1,41 @@
-# 架构与数据流
+# Architecture and data flow
 
-## 1. 分层原则
+## 1. Layer boundaries
 
-项目把权威仿真与 Unity 表现严格分开：
+The project separates authoritative simulation from Unity presentation:
 
-- `SwarmECS.Core`：Q16.16、向量、确定性工具，无 `UnityEngine`。
-- `SwarmECS.Simulation`：SoA World、寻路、空间查询、ORCA、碰撞和 rollback state，无 `UnityEngine`。
-- `SwarmECS.Runtime`：输入、HUD、相机、GPU buffer 与商业加载边界。
-- `SwarmECS.Editor`：场景生成、测试、benchmark、YooAsset / HybridCLR 配置。
+- `SwarmECS.Core`: Q16.16 values, vectors and deterministic utilities; no `UnityEngine` reference.
+- `SwarmECS.Simulation`: SoA World, navigation, spatial queries, ORCA, collision, rollback, replay and diagnostics; no `UnityEngine` reference.
+- `SwarmECS.Runtime`: input, HUD, camera, GPU buffers and commercial loading boundary.
+- `SwarmECS.Editor`: scene setup, tests, benchmark, replay tooling and package configuration.
 
-仿真以固定 30 Hz 推进。渲染可以使用 `float` 和可变帧率，但表现值不会回写权威世界。
+The simulation advances at a fixed 30 Hz. Rendering may use `float` and a variable frame rate, but presentation values never write back into authoritative state.
 
-## 2. 一个 logic tick
+## 2. Logic tick
 
-`RollbackController.Step()` 先保存 tick 起点快照，再应用该 tick 的命令，然后执行固定 System 顺序：
+`RollbackController.Step()` stores a snapshot at the tick boundary, applies commands in canonical order, then runs Systems in a fixed sequence:
 
 ```mermaid
 flowchart LR
     A["Save snapshot"] --> B["Apply ordered commands"]
     B --> C["Detect path requests"]
     C --> D["Process fixed A* budget"]
-    D --> E["Prepare derived shared paths"]
+    D --> E["Prepare shared paths"]
     E --> F["Preferred velocity"]
-    F --> G["Grid radius / KD radius / KD KNN"]
-    G --> H["Agent-Agent ORCA LP"]
-    H --> I["Fixed-point integration"]
-    I --> J["Static circle-OBB resolve"]
-    J --> K["Advance tick"]
-    K -. "presentation only" .-> L["GPU upload + RenderMeshIndirect"]
+    F --> G["Agent + obstacle queries"]
+    G --> H["Obstacle-prefix ORCA LP"]
+    H --> I["Acceleration / turn limiter"]
+    I --> J["Swept movement + slide"]
+    J --> K["SAT fallback"]
+    K --> L["Advance tick"]
+    L -. "presentation only" .-> M["GPU upload + indirect draw"]
 ```
 
-所有 Agent 的 ORCA 都读取本 tick 开始时的 position / velocity，只写独占的 `NextVelocities[i]`；worker barrier 完成后才统一积分，因此线程完成顺序不会形成读后写依赖。
+All Agent ORCA jobs read the same tick-start position/velocity arrays and write only their assigned `NextVelocities[i]`. A barrier completes before movement integration, so worker completion order cannot form a read-after-write dependency.
 
-## 3. SoA World 与状态分类
+## 3. SoA World and state classes
 
-### Agent 组件列
+### Agent component columns
 
 ```text
 Positions[]           FPVector2
@@ -48,105 +49,101 @@ Groups[]              byte
 PathCursors[]         ushort
 ```
 
-实体 ID 为 `Index + Generation`。数组固定容量、不在运行中 resize；热 System 顺序扫描组件列。
+Entity identity is `Index + Generation`. Arrays have fixed capacity and hot Systems scan columns in stable index order. This is a deliberately small data-oriented runtime, not a general archetype/chunk replacement.
 
-### 权威、静态与派生数据
-
-| 类别 | 代表字段 | 处理方式 |
+| Class | Examples | Rule |
 |---|---|---|
-| 动态权威状态 | tick、position、velocity、group target、path cursor、`GroupPathState`、`NextPathRequestSequence`、`SpatialIndexMode` | 进入 hash；未来会影响 replay 的字段进入 snapshot |
-| 初始化后静态数据 | seed、group、radius、max speed、formation offset、当前静态 map/config | 由相同 seed/config 构建，运行时不修改 |
-| 派生热数据 | preferred / next velocity | 每 tick 重算，不进 snapshot |
-| 派生路径缓存 | `SharedPath[]` 的 node/waypoint、`SharedPathCache` 内容 | 从 authoritative key + deterministic map/A* 重建，不复制进每帧 snapshot |
-| 表现数据 | HUD 字符串、camera、GPU upload buffer | 不参与权威结果 |
+| Dynamic authority | tick, position, velocity, group target, path cursor, `GroupPathState`, request sequence, `SpatialIndexMode` | Included in authority hashing; future-affecting values are snapshotted |
+| Immutable setup | seed, group, radius, max speed, formation offset, config, static obstacle topology | Rebuilt from the same input; topology changes start a new epoch |
+| Derived hot data | preferred/next velocity, query scratch, ORCA lines | Recomputed; excluded from snapshots |
+| Derived path cache | shared path nodes/waypoints and cache entries | Rebuilt from authoritative keys and deterministic A* |
+| Presentation | HUD strings, camera and GPU upload buffers | Excluded from authority |
 
-这里的 ECS 是为解释数据布局和确定性边界而手写的最小框架，不是完整的 archetype/chunk Unity Entities 替代品。
+## 4. Navigation
 
-## 4. 动态共享寻路调度
+### Grid and connectivity
 
-### 4.1 Grid 与连通岛
+The 64×64 navigation grid uses eight-way movement. Static OBBs are rasterized with Agent clearance; an integer penalty kernel increases nearby walk cost. Diagonal movement is rejected when both adjacent cardinal cells are blocked.
 
-导航图是 64×64、八邻接 `GridMap`。静态 OBB 先按 Agent clearance 栅格化为 blocked cell，再用整数权重核为邻近 walkable cell 添加惩罚。A* 禁止从两个 blocked cardinal cell 之间斜穿。
+`GridIslandMap` uses exactly the same neighbor and diagonal rules for connected-component labeling. Region seeds are scanned row-major, arrays are allocated once, and blocked/out-of-bounds/cross-region requests are rejected before A* expansion. A map revision change invalidates derived navigation data.
 
-`GridIslandMap` 使用完全相同的八邻接与 diagonal corner rule 做 connected-component labeling：
+### Fixed request budget
 
-- region seed 按 row-major 顺序扫描，region id 可重复验证；
-- `_regionIds` 与 flood queue 在构造时一次分配；
-- `GridMap.Revision` 改变时延迟重建；
-- blocked、越界或跨岛请求在 A* 前直接标记为 `Unreachable`。
+Each of four groups owns one `GroupPathState` containing the resolved key and at most one pending key. A new goal for the same group replaces its unprocessed goal. Across groups, the smallest stable pending sequence runs first; the default budget is one request per tick.
 
-### 4.2 固定预算请求队列
+The start anchor is the fixed-point average of `Position - FormationOffset` for the group. If that cell is unusable, the nearest walkable cell is chosen by raw squared distance and stable node ID.
 
-每个群组有一个 `GroupPathState`，同时保存最近 resolved 结果和最多一个 pending 请求：
+This structure intentionally models four bounded group slots; it is not an arbitrary-capacity request queue.
 
-```text
-ResolvedStart / Goal / MapRevision / Status
-PendingStart / Goal / MapRevision / Sequence
-```
+### Shared path cache
 
-每个 tick 的调度流程是：
+`SharedPathCache` has 68 preallocated entries by default. Its key is `(start, goal, mapRevision)` and deterministic round-robin chooses an eviction slot. A hit copies into the group’s reusable path; a miss runs allocation-free A* and fills the slot.
 
-1. 比较当前 group target 与 resolved/pending key。
-2. 目标变化时，对该组所有成员的 `Position - FormationOffset` 求定点数平均，得到逻辑编队中心；若中心 cell 不可走或越界，按 raw-distance square、再以较小 node id 隐式 tie-break 稳定选择最近可走 cell 作为 anchor。
-3. 从所有 pending group 中选择序号最早者。
-4. 默认最多处理 `1 request/tick`；构造器允许显式配置其他固定预算。
-5. 先检查 walkability / island connectivity，再查询 cache 或执行 A*。
-6. 写回 `Active` / `Unreachable`，并重置该群组的 path cursor。
+The cache and its replacement cursor are derived state. After rollback, a resolved path can be copied from cache or synchronously rebuilt from its authoritative key. A derived rebuild does not create a new path request and does not consume the per-tick authority budget.
 
-当前只有 4 个群组，因此“队列”体现在 4 个固定状态槽中，不需要每 tick 创建 request object 或动态容器。
+A* uses a binary heap with stable `f → h → nodeId` ordering. With `V=4096` and at most eight edges per node, the standard bound is `O((V + E) log V)` time and `O(V)` storage. The 10,000 Agents share four group paths.
 
-### 4.3 SharedPathCache
+## 5. Neighborhood queries
 
-`SharedPathCache` 默认固定 68 个 entry（4 个群组 + 默认 64 tick rollback window），每个 entry 在初始化时预分配到 `GridMap.NodeCount`：
-
-- key：`startIndex + goalIndex + mapRevision`；
-- hit：复制进对应群组的 reusable `SharedPath`；
-- miss：运行 allocation-free A*，成功后写入 cache；
-- eviction：确定性 round-robin，常数时间选择替换槽。
-
-Cache 内容和 replacement cursor 不属于权威状态。原因是 hit 与 miss 都必须得到同一条确定性路径；cache 只改变计算成本。Rollback 后如果 waypoint buffer 指向未来状态，`PrepareDerivedPaths()` 会根据已恢复的 `GroupPathState` key 从 cache 复制。默认 68 项覆盖 4 个 active group path 与 64 tick 窗口的常见恢复集合；极端淘汰导致 derived cache miss 时，系统会**同步重建 A***，以便本 tick 立即使用已恢复的权威 path state。
-
-这类 `DerivedAStarRebuilds` 不代表新的 gameplay path request，也不消耗 `MaxPathRequestsPerTick`；HUD 因此把正常调度写成 `Path req`，并单列 `replay A*`。同步重建仍复用预分配 A* storage，已有 cache-eviction rollback 的 0 B 测试。
-
-### 4.4 A* 复杂度边界
-
-A* 使用 binary heap，标准上界为 `O((V + E) log V)`、空间 `O(V)`；当前 `V=4096`、每节点最多 8 条边。10,000 个 Agent 不各自运行 A*，而是 4 个群组共享宏观路径，Agent 只保留 `ushort PathCursor` 与 formation offset。
-
-## 5. 三种邻域查询
-
-| 模式 | 行为 | 当前执行路径 | 复杂度边界 |
+| Mode | Semantics | Execution | Complexity boundary |
 |---|---|---|---|
-| Uniform Grid radius | 扫描覆盖 cell，维护有序 bounded top-K | 默认；持久 worker pool 并行 | hash build 平均 `O(N)`；query 与访问候选数相关，极端密集最坏 `O(N)` |
-| KD-Tree radius | `ulong` raw-square branch-pruned 半径搜索，按距离/id 排序 | 单线程对照 | balanced tree 可剪枝，但最坏访问 `O(N)`；m 个命中排序 `O(m log m)` |
-| KD-Tree exact KNN | 65-bit raw-square 查询 `MaxNeighbors + 1`，过滤 self 后最多保留 `MaxNeighbors` | 单线程对照 | exact branch-pruned KNN，最坏仍可能访问 `O(N)` |
+| Uniform Grid radius | Covered-cell scan with bounded top-K | Persistent worker pool by default | Build is average `O(N)`; a dense query can inspect `O(N)` candidates |
+| KD-Tree radius | Exact `ulong` raw-square radius test | Caller thread | Branch pruning is data-dependent; worst case `O(N)` |
+| KD-Tree exact KNN | 65-bit raw-square nearest-neighbor test | Caller thread | Exact pruning; worst case `O(N)` |
 
-KD radius 在 raw integer space 使用精确的单轴 `ulong` square；因为非负 FP radius 的平方最多是 `int.MaxValue²`，二维距离超过 `ulong` 时必然已经在半径外，所以饱和不会改变过滤结果。Exact KNN 不能采用这个捷径：任意两点的二维 Q16.16 raw-square 最多需要 65 位，因此实现以 `1-bit carry + ulong low` 保存完整距离，候选排序与 split-plane pruning 都使用该宽距离，最后只用 entity id 消除真实同距歧义。极端坐标和 far-branch 回归覆盖了 `ulong` 边界；但 KD-Tree 仍不能被简化宣传成“稳定 O(log N)”。
+Exact KNN stores squared distance as a one-bit carry plus a 64-bit low word, which covers the complete two-dimensional Q16.16 coordinate domain. Results are ordered by distance and stable entity ID.
 
-`SpatialIndexMode` 属于权威 simulation configuration，会进入 hash/snapshot；Avoidance 每 tick 从 World 读取该模式。Host 的 `K` 键只负责计算下一模式并调用 `QueueSpatialIndexMode()`，将 `SimulationCommandType.SetSpatialIndexMode` 以当前 tick 和稳定 sequence 排入同一 `CommandTimeline`。它在下一次 logic step 的 command phase 生效；rollback 即使跨越切换 tick，也会按原 `(tick, sequence)` 重新应用该命令，因此不需要清空 history。
+`SpatialIndexMode` affects future velocity and is therefore authoritative. Runtime mode changes enter the same command timeline and are restored/reapplied by rollback.
 
-Late authority 注入也遵守事务边界：网络层把服务器给出的完整 `SimulationCommand` 传给 `InjectLateCommand()`，原始 `(tick, sequence)` 不会按抵达顺序重分配。`RollbackController` 先调用 `WorldSnapshotRing.Contains()`，确认 origin tick 的 slot 和 agent count 仍可恢复，之后才把命令插入 timeline。快照缺失（例如 history 已重置或环槽已不匹配）时直接拒绝，既不污染 command history，也不推进本地演示 sequence。每次保存 tick `T` 的快照后，Controller 会原地丢弃早于 `T - HistoryLength + 1` 的有序命令前缀；最深可恢复 tick、当前 tick 与未来命令仍保留，因此固定容量服务于 rollback window，而不会随进程累计历史永久耗尽。Host 的 `InjectLocallyGeneratedLateGroupTarget()` 只用于按键模拟延迟，不是网络接收 API。
+## 6. Static-obstacle data
 
-## 6. ORCA 并行与碰撞边界
+Static OBBs are copied at simulation construction. Each box produces four counter-clockwise, stable-ID segments. The obstacle set and its BVH are immutable for the lifetime of the simulation.
 
-- ORCA 只从选中的 **Agent neighbors** 生成 half-plane；默认最多 8 条。
-- 修正量的一半由当前 Agent 承担，LP1 / LP2 / LP3 在定点数空间求解安全速度。
-- 完全重叠时用 stable entity id 构造可复现的反对称逃逸方向。
-- Uniform Grid 模式按连续 entity range 分给主线程和持久 worker；每条 lane 有独立 query / neighbor / line scratch。
-- KD radius 与 KD exact KNN 当前保持单线程，便于暴露重建和 traversal 的真实成本。
+OBB input directions are deterministically quantized so `AxisX`/`AxisY` are exactly orthogonal and have `SqrMagnitude == FP.One` under Q16.16 dot-product truncation. Converting local slabs back into world coordinates can still differ from the vertex envelope because each dot-product term truncates independently. `FPAabb2.FromOrientedBox` therefore rounds products outward and adds a proven three-raw-unit two-dimensional bound per world axis. Circle-corner SAT comparisons use exact raw-coordinate squared distance, avoiding sub-unit false positives from ordinary Q16.16 multiplication.
 
-ORCA 当前没有 static-obstacle line。静态障碍先影响 A* grid，移动后再做 circle-vs-OBB 离散穿透修正。碰撞库另有 OBB-vs-OBB SAT，但运行时 Agent 不是 OBB；项目也没有 Agent-Agent contact solver 或 CCD。
+The BVH owns its nodes and obstacle ordering; each caller owns reusable query scratch. Candidate output is stable by obstacle ID. Construction is a one-time deterministic insertion sort with worst-case `O(N²)` cost. Query pruning is distribution-dependent and worst-case `O(N)`; ordering K returned candidates costs `O(K log K)`.
 
-## 7. 渲染边界
+The same structure serves two paths:
 
-`SwarmIndirectRenderer` 在表现帧中遍历全部 Agent，将 fixed-point raw 转成 `float` 并上传 `GraphicsBuffer`。Vertex shader 依据 `SV_InstanceID` 读取位置、速度、group 和 radius，在 GPU 组装实例变换。
+1. avoidance queries collect nearby visible segment constraints;
+2. swept movement queries collect obstacles intersecting the motion AABB.
 
-- 全部 Agent 使用一个 `Graphics.RenderMeshIndirect` command。
-- 地面和静态障碍有独立 draw，不能称“全场景一 draw call”。
-- 当前仅通过一个 swarm `worldBounds` 做整批 culling。
-- 没有 ComputeShader visibility list、per-instance frustum/occlusion、Hi-Z、GPU simulation 或 HLOD。
+A topology change requires constructing a new obstacle set and resetting history. Current snapshots do not serialize BVH nodes or obstacle topology and cannot cross that epoch boundary.
 
-## 8. 内存与 GC
+## 7. ORCA, motion and collision
 
-组件列、空间索引、A* open/closed/heap、island flood queue、共享路径/cache、ORCA scratch、命令时间线和 snapshot ring 都在初始化时分配。热循环不使用 LINQ、装箱、闭包或容量增长。
+### Constraint ordering
 
-10,000 Agent × 64 tick 的 snapshot ring 主要保存 position、velocity 与 path cursor，原始数组约 11 MiB，再加少量 group target / path state 元数据。它用内存换取 `tick % historyLength` 的 O(1) slot 定位；当前没有 delta compression。
+Obstacle neighbors are filtered and sorted deterministically. Their half-planes form a prefix in the ORCA line buffer, followed by bounded Agent-Agent lines. LP3 receives the actual obstacle-prefix count, preserving the obstacle constraints when it repairs an infeasible candidate.
+
+Agent overlap uses stable entity IDs to choose a reproducible antisymmetric escape direction. Worker lanes own their neighbor, line and projection buffers.
+
+### Motion limiter
+
+The ORCA result is a holonomic target velocity. `KinematicVelocityLimiter` then applies maximum acceleration, maximum per-tick turn and maximum speed.
+
+This ordering has an explicit consequence: a limited velocity may no longer satisfy every ORCA half-plane. The runtime therefore does not claim strict kinodynamic feasibility. A future motion-aware solver would have to include acceleration and turn constraints inside the optimization domain.
+
+### Conservative CCD and fallback
+
+Movement uses a swept circle against an OBB expanded by the Agent radius, implemented as a fixed-point slab test in obstacle-local space. Earliest time of impact is selected by time, obstacle ID and feature ID; a fixed number of impact iterations project the remaining displacement along the contact tangent.
+
+The expanded box has square corners, so the sweep is conservative near the true rounded Minkowski corner and may report contact early. The swept broadphase expands by the true circular radius, so it is not required to preserve narrowphase hits that exist only in this square-corner conservative region; real circle/box contacts remain inside the conservative OBB bounds. This is accepted in exchange for a deterministic, no-tunneling broad phase/narrow phase path.
+
+After the sweep, circle-vs-OBB penetration recovery/SAT remains a final geometric guard and diagnostic. Normal obstacle approach should be handled by ORCA and CCD rather than repeated push-out. Telemetry records obstacle/agent lines, BVH queries/candidates, sweep hits, fallback recoveries and maximum residual depth.
+
+## 8. Rollback, replay and diagnostics
+
+The snapshot ring stores dynamic authority for a bounded rollback window. The command timeline stores canonical `(tick, sequence)` entries in fixed capacity and discards only the prefix older than the earliest restorable tick.
+
+Versioned `.swarmreplay` data records simulation identity/configuration, seed, canonical commands and checkpoint hashes with explicit little-endian encoding, bounded counts and integrity validation. Already validated command streams append to `CommandTimeline` in O(N) total time and sequential playback advances a cursor instead of rescanning history every tick; rewinding a tick resets that cursor for rollback semantics. A combined Agent/tick/command/checkpoint execution budget is checked before variable command allocation and again after checkpoint decoding. A headless runner can execute the same input without rendering.
+
+Layered authority hashing splits the full hash into config, world metadata, group targets, group path state, navigation request sequence, positions, velocities and path cursors. When two worlds differ, the diagnostic scan uses the same schema order to report the first component, entity/group, field and raw value mismatch.
+
+Replay is an observability and reproduction mechanism, not a network transport. Platform-wide bit identity requires running the same replay artifact on every claimed backend/architecture and retaining the results.
+
+## 9. Rendering and memory
+
+`SwarmIndirectRenderer` converts fixed-point raw values to presentation floats, uploads all Agents to a `GraphicsBuffer`, and draws them through one `Graphics.RenderMeshIndirect` Agent command. Ground and obstacles use separate draws. There is currently one aggregate bounds test, not per-instance GPU visibility, Hi-Z or HLOD.
+
+Component columns, spatial indices, A* storage, island flood queue, path cache, worker scratch, command timeline and snapshot ring allocate during setup. Sampling uses `GC.GetAllocatedBytesForCurrentThread()`, so a 0 B result proves only the measured thread’s allocation delta. All-worker allocation evidence requires a separate profiler capture.

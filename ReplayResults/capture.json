@@ -1,0 +1,27 @@
+{
+    "unityVersion": "6000.3.9f1",
+    "timestampUtc": "2026-07-14T14:06:49.2007250Z",
+    "processId": 29915,
+    "replaySchemaVersion": 1,
+    "logicHash": "0x35B82A1C03E5E1B7",
+    "configHash": "0x31B24B9577CABB7E",
+    "replayFile": "cross-process.swarmreplay",
+    "replaySha256": "F69DE88B1761753868549ADE4789E6B5BE495A199B30732C17A9A9B7BF6D4BB5",
+    "replayBytes": 259,
+    "formationSeed": "0xC0DEC0DE",
+    "agents": 256,
+    "commands": 5,
+    "checkpoints": 5,
+    "finalTick": 120,
+    "finalAuthorityHashes": {
+        "config": "0x094B0D80BB53722C",
+        "worldMetadata": "0x36B14B1EDE5AB189",
+        "groupTargets": "0x7828A4D1B59EC254",
+        "groupPathStates": "0x3ECE05FFEE584A98",
+        "navigationRequestSequence": "0xA22E8426F7AA0A12",
+        "agentPositions": "0x643B1A8F04A66F9A",
+        "agentVelocities": "0x0DB20CC3077275F1",
+        "agentPathCursors": "0x7BA20BF6A13267D7",
+        "full": "0x4276D45139792AF6"
+    }
+}

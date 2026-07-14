@@ -1,12 +1,27 @@
 # Third-Party Notices
 
-本仓库自有源码使用 [MIT License](LICENSE)。以下依赖通过 Unity Package Manager 的固定 Git tag 引用，源码未直接复制进本仓库；各依赖继续适用其自己的许可证。
+Repository-owned source is licensed under the [MIT License](LICENSE), except where an individual file or the entries below state otherwise.
+
+## RVO2
+
+Parts of the fixed-point ORCA obstacle-line construction and linear-program structure are adapted from:
+
+- Project: [RVO2](https://github.com/snape/RVO2)
+- Reference source: [`src/Agent.cc`](https://github.com/snape/RVO2/blob/main/src/Agent.cc)
+- Copyright: 2008 University of North Carolina at Chapel Hill
+- License: Apache License 2.0
+
+The adaptation changes numeric representation, storage, query integration and deterministic tie-breaks for this repository. The adapted portions remain subject to Apache License 2.0. A copy is provided at [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt).
+
+## Package dependencies
+
+These dependencies are referenced through pinned Unity Package Manager Git tags and remain subject to their own licenses:
 
 | Dependency | Pinned version | License | Source |
 |---|---|---|---|
 | YooAsset | 3.0.4 | Apache License 2.0 | [tuyoogame/YooAsset](https://github.com/tuyoogame/YooAsset/tree/3.0.4) |
 | HybridCLR Unity package | 8.12.0 | MIT License | [focus-creative-games/hybridclr_unity](https://github.com/focus-creative-games/hybridclr_unity/tree/v8.12.0) |
 
-Unity Editor、内置模块、Unity Test Framework 及其他 Unity Package Manager 组件受其各自的 Unity 许可条款约束，不因本项目的 MIT License 而重新授权。
+Unity Editor, built-in modules, Unity Test Framework and other Unity Package Manager components are governed by their respective Unity/package terms and are not relicensed by this repository’s MIT License.
 
-发布二进制 Player、AssetBundle 或重新分发第三方源码前，应再次核对目标版本的许可证、NOTICE 与 Unity 发行条款。
+Before redistributing a Player, AssetBundle or third-party source, verify the exact dependency versions, notices and applicable Unity distribution terms again.

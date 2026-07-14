@@ -1,83 +1,74 @@
 # Swarm-ECS-Sandbox
 
-> 10,000 Agent · Q16.16 Fixed-Point · Custom SoA ECS · Budgeted Dynamic A* · Uniform Grid / KD-Tree · RVO2 ORCA · Rollback · Indirect Rendering
+> 10,000 Agents · Q16.16 Fixed-Point · Custom SoA ECS · Budgeted A* · Uniform Grid / KD-Tree · RVO2-style ORCA · Rollback · Versioned Replay · Indirect Rendering
 
-这是一个面向客户端底层、确定性仿真与网络同步岗位的 Unity 技术作品集。项目不使用 Unity Physics、NavMesh 或“每个单位一个 GameObject”：10,000 个 Agent 的权威逻辑运行在纯 C#、固定容量、固定时间步的仿真中，Unity 只承担输入、调试 UI 与表现渲染。当前“确定性”证据覆盖同一代码与运行环境中的双 World、命令重放和 rollback；跨进程、Mono/IL2CPP 与 ARM64/x64 一致性仍是下一阶段。
+Swarm-ECS-Sandbox 是一个面向大规模确定性仿真的 Unity 工程。10,000 个 Agent 的权威逻辑运行在纯 C#、固定容量、固定时间步的数据层；Unity 负责输入、调试界面与 GPU 表现。核心仿真不依赖 Unity Physics、NavMesh，也不为每个 Agent 创建 GameObject。
 
 ![10,000-agent Swarm ECS Sandbox](Docs/Images/swarm-sandbox.png)
 
-## 发布与证据状态
+## Release line
 
-- 当前公开版本为 `v0.2.1 Navigation Completeness`；只有绑定具体 commit 的 Git tag、GitHub Release 和附件才作为公开证据，分支或工作树中的内容不计入发布能力。
-- `BenchmarkResults/latest.json` / `latest.md` 与 `spatial-index-matrix.json` / `.md` 是仓库跟踪的短时 headless 结果。2026-07-14 在 v0.2.1 源码上本地运行完整 EditMode：**77 / 77 Passed，0 failed/skipped**；原始 `TestResults/editmode.xml` 作为 Release 附件公开，耗时以附件中的对应运行记录为准。
-- 默认 GitHub Actions 只做无需 Unity License 的静态校验并归档仓库内 benchmark；可选 GameCI job 只有显式配置后才运行 Unity 测试。绿色静态检查不能被描述成“远端 Unity EditMode 已通过”。
-- 发布前检查与证据清单见 [`Docs/RELEASE_CHECKLIST.md`](Docs/RELEASE_CHECKLIST.md)，版本变化见 [`CHANGELOG.md`](CHANGELOG.md)。
+`v0.3.0` 在导航与 rollback 基线上补齐了静态障碍避让、保守连续碰撞检测、运动学限幅、版本化 replay、分层权威哈希与字段级不同步定位。公开能力以 Git tag、GitHub Release 和同一 commit 生成的证据附件为准；工作树中的结果不视为发布证据。
 
-## 已实现
+默认 GitHub Actions 会执行无需 Unity License 的静态工程与证据格式校验。Unity EditMode job 只有配置授权后才运行，因此静态 job 通过不代表远端已执行 Unity 测试。
 
-- **Q16.16 定点数核心**：饱和加减乘除、整数平方根、向量、确定性 PRNG 与 FNV-1a 状态哈希；`Core` / `Simulation` 不引用 `UnityEngine`。
-- **自定义 SoA ECS**：Position、Velocity、Radius、Group、PathCursor 等按组件列连续存储；实体使用稳定的 `index + generation`，运行容量预分配。
-- **预算化动态 A***：64×64 八邻接网格支持动态群组目标；4 个群组各有一个固定请求状态槽，同组新目标会合并未处理目标，跨群组按稳定序号选择，默认每个 logic tick 最多处理 **1 个**。它不是任意容量的通用请求队列。Replan anchor 是群组内 `Position - FormationOffset` 的定点数平均中心，必要时以稳定 node id tie-break 选择最近可走 cell，避免把 formation offset 叠加两次。
-- **连通岛预检**：`GridIslandMap` 使用与 A* 相同的斜角规则标记连通分量，在进入 A* 前拒绝 blocked 或跨岛请求；地图 revision 变化时以预分配数组重建。
-- **固定容量路径缓存**：`SharedPathCache` 默认 68 项（4 个群组 + 默认 64 tick rollback window），以 `(start, goal, mapRevision)` 为 key、确定性 round-robin 替换；10,000 个 Agent 共享 4 条宏观路线。极端 rollback cache miss 会同步重建派生 A*，不占权威 path-request budget。
-- **三种邻域模式**：Uniform Grid radius + bounded top-K（默认并行）、KD-Tree radius、KD-Tree exact KNN；radius 查询使用精确 `ulong` raw-square，KNN 使用覆盖完整二维 Q16.16 坐标域、无分配的 65-bit squared distance，再按 `distance² + entityId` 排序，避免极端两轴距离溢出或饱和破坏 exact KNN。
-- **Agent-Agent ORCA**：手写 RVO2-style half-plane 与 LP1/LP2/LP3，默认每 Agent 最多 8 邻居；持久 worker pool 按固定区间并行，无每 tick `Task` / LINQ / 临时容器。
-- **定点数碰撞**：模块包含 OBB-vs-OBB SAT；运行时 Agent 使用 circle-vs-OBB 穿透修正处理 5 个静态障碍，不依赖 Unity Physics。
-- **Rollback / Catch-up**：64 tick 快照环、按 `(tick, sequence)` 排序的命令时间线、延迟指令回滚重演，以及追帧期间跳过渲染。群组目标和 `SpatialIndexMode` 都通过权威命令在指定 tick 生效；late command 会先确认目标快照仍可恢复，再写入 timeline。时间线按最老可恢复 tick 确定性回收过期有序前缀，以固定容量存储持续复用。
-- **可重建路径状态**：`GroupPathState`、pending request sequence、全局请求序号与 `SpatialIndexMode` 进入状态哈希和快照；大块 waypoint/node 数组是可从 key 重建的派生缓存，不复制进每帧快照。
-- **Indirect Agent Rendering**：CPU 上传全部 Agent 的结构化数据，Unity 6 `Graphics.RenderMeshIndirect` 用一个 Agent indirect command 绘制；无逐 Agent GameObject。
-- **商业化接入边界**：工程固定 YooAsset 3.0.4 与 HybridCLR 8.12.0，包含 asmdef、collector、AOT metadata / DLL 加载入口，但不把未执行的平台发布流程描述成生产级热更。
-- **本地 EditMode 验证**：v0.2.1 完整 suite 为 **77 / 77 Passed，0 failed/skipped**，覆盖定点数、Grid/KD radius 原始距离等价性、完整 Q16.16 域 65-bit exact KNN、600 条命令的 timeline 回收、三种邻域模式快照/命令重放、late-command 原子拒绝、GridIslandMap、逻辑编队中心、预算调度/缓存、map revision、派生 A* 重建、SAT、ORCA、回滚与热路径零分配。原始 XML 的公开状态以对应 Release artifact 为准。
+## Architecture
 
-## 最新可复现基准
+```mermaid
+flowchart LR
+    A["Ordered commands"] --> B["Budgeted navigation"]
+    B --> C["Spatial queries"]
+    C --> D["Obstacle + agent ORCA"]
+    D --> E["Acceleration / turn limits"]
+    E --> F["Swept collision + slide"]
+    F --> G["SAT fallback"]
+    G --> H["Snapshot / hash / replay"]
+    H -. "presentation only" .-> I["GPU indirect rendering"]
+```
 
-结果来自仓库内 [`BenchmarkResults/latest.json`](BenchmarkResults/latest.json)，使用 `-batchmode -nographics` 测量**纯逻辑 tick**。`Null Device` 表示没有测 GPU 渲染，因此这不是移动端或“60 FPS”结论。
+权威状态只使用 Q16.16、稳定遍历顺序和显式 tie-break。渲染层可使用 `float` 与可变帧率，但表现值不会写回仿真。
 
-| 项目 | 实测值 |
-|---|---:|
-| Unity / CPU | 6000.3.9f1 / Apple M5 Pro（15 logical cores） |
-| Graphics Device | Null Device |
-| Agent / Spatial Mode | 10,000 / Uniform Grid |
-| 固定逻辑预算 | 30 Hz（33.333 ms/tick） |
-| Warmup / Sample | 8 / 32 ticks |
-| Avoidance execution | Caller + 14 background workers |
-| Path budget / Cache | 1 request/tick / 68 entries |
-| Navigation islands / Shared waypoints | 1 / 248 |
-| Average | **19.919240625 ms/tick** |
-| P95 | **24.5924 ms/tick** |
-| Min / Max | 17.0747 / 26.0361 ms |
-| Current-thread managed allocation | **0 B** |
-| Final authoritative hash | `0x4BD5680667C14261` |
-| Canonical spatial comparison hash | `0x4BD5680667C14261` |
+## Implemented systems
 
-这组数据只证明该硬件、Unity 版本与短采样配置下的逻辑性能。温控、后台负载和代码改动都会改变结果；它没有采集所有 worker 的 allocation，长稳 P99 与移动平台矩阵仍在路线图中。
+- **Q16.16 fixed-point core**：饱和加减乘除、整数平方根、向量、确定性 PRNG、配置哈希与状态哈希；`Core` / `Simulation` 不引用 `UnityEngine`。
+- **Custom SoA ECS**：Position、Velocity、Radius、Group、PathCursor 等按组件列连续存储；实体使用稳定的 `index + generation`，运行容量预分配。
+- **Budgeted shared A\***：64×64 八邻接网格、稳定 binary heap、连通岛预检、地图 revision、4 个固定群组请求槽、每 tick 固定预算和 68-entry 确定性路径缓存。10,000 个 Agent 共享 4 条宏观路线，而非各自执行 A*。
+- **Three neighborhood modes**：Uniform Grid radius + bounded top-K、KD-Tree radius、KD-Tree exact KNN。KNN 以 65-bit squared distance 覆盖完整二维 Q16.16 坐标域。
+- **Static and dynamic avoidance**：静态 OBB 生成稳定有向边与 obstacle ORCA lines；Agent-Agent 使用 RVO2-style half-plane 与 LP1/LP2/LP3。障碍约束固定写在 Agent 约束之前。
+- **Immutable obstacle broadphase**：静态障碍构建不可变 BVH，查询复用 caller-owned scratch，并以稳定 ID 输出候选。
+- **Fixed-point collision pipeline**：OBB 基轴量化为 Q16.16 点积下的严格正交单位基，BVH bounds 包含有证明上界的 raw-unit 截断保护；expanded-OBB slab conservative CCD、exact-raw circle corner distance、固定次数 impact/slide、SAT 最终穿透恢复与残余深度遥测。
+- **Bounded kinematics**：ORCA 目标速度之后应用最大加速度、最大转向步长与最大速度限制；所有参数进入 `ConfigHash`。
+- **Rollback and catch-up**：64 tick snapshot ring、按 `(tick, sequence)` 排序的固定容量命令时间线、延迟命令回滚重演，以及追帧期间跳过中间渲染。
+- **Versioned replay and diagnostics**：`.swarmreplay` 固定字节序、显式 schema/config/logic 信息、命令与 checkpoint、完整性校验、有界执行预算、O(N) 规范命令装载与顺序播放；分层权威哈希可进一步定位到 component、entity/group、field 与 raw value。
+- **Indirect rendering**：CPU 上传 Agent 结构化数据，Unity 6 `Graphics.RenderMeshIndirect` 以一个 Agent indirect command 绘制；没有逐 Agent GameObject。
+- **Commercial integration boundary**：工程固定 YooAsset 3.0.4 与 HybridCLR 8.12.0，并提供程序集、资源收集与加载边界；目标平台发布闭环仍需独立验收。
 
-同一 formation seed、fixed delta、neighbor distance、max neighbors 与 8/32 warmup/sample 下的三模式端到端对照位于 [`BenchmarkResults/spatial-index-matrix.json`](BenchmarkResults/spatial-index-matrix.json)：
+## Reproducible evidence
 
-| Spatial mode | Avoidance execution | Average | P95 | Min / Max | Current-thread GC | Full hash | Canonical hash |
-|---|---|---:|---:|---:|---:|---|---|
-| Uniform Grid radius | Caller + 14 workers | **18.73074375 ms** | **21.2342 ms** | 16.8525 / 22.6702 ms | 0 B | `0x4BD5680667C14261` | `0x4BD5680667C14261` |
-| KD-Tree radius | Caller thread | 114.1174875 ms | 125.944 ms | 104.8276 / 127.9858 ms | 0 B | `0xE8AE71279C8EC54C` | `0x4BD5680667C14261` |
-| KD-Tree exact KNN | Caller thread | 98.874775 ms | 108.3109 ms | 90.9214 / 109.7333 ms | 0 B | `0x008726C93F9563E3` | `0x4BD5680667C14261` |
+仓库跟踪三组 10k headless 结果：
 
-这是当前三个**完整运行模式**的逻辑 tick 对照，不是隔离 spatial query 的微基准：Uniform Grid 使用持久 worker pool，而两个 KD 模式当前在 caller thread 执行 avoidance，因此差值同时包含查询结构与执行策略。Full hash 包含权威字段 `SpatialIndexMode`，跨模式时本来就应不同；canonical hash 只在计算时把该字段归一化，其余权威状态不变。Uniform Grid radius 与 KD radius 的 canonical hash 一致，证明本次相同 seed/config 运行结束时的权威结果等价。KD exact KNN 在这次场景中也得到相同 canonical hash，但它的选邻语义不同，这只是当前输入下的观察，不能泛化为所有密度与半径配置都等价。
+- [`BenchmarkResults/latest.json`](BenchmarkResults/latest.json) / [`latest.md`](BenchmarkResults/latest.md)：默认 Uniform Grid 的完整逻辑 tick。
+- [`BenchmarkResults/spatial-index-matrix.json`](BenchmarkResults/spatial-index-matrix.json) / [`spatial-index-matrix.md`](BenchmarkResults/spatial-index-matrix.md)：相同 seed/config 下的三种完整运行模式。
+- [`BenchmarkResults/obstacle-approach/latest.json`](BenchmarkResults/obstacle-approach/latest.json) / [`latest.md`](BenchmarkResults/obstacle-approach/latest.md)：延长 warmup/sample、实际触发静态障碍 ORCA 与 CCD 的场景。
 
-## 快速运行
+结果记录 Unity/CPU/Graphics Device、warmup/sample、执行策略、`ConfigHash`、full/canonical state hash，以及 obstacle/agent ORCA lines、BVH query/candidate、CCD、SAT fallback、加速度/转向限幅等计数。`Null Device` 只代表纯逻辑测量，不代表渲染帧率；`managedBytesAcrossSamples` 只覆盖采样线程，不等同于所有 worker 均零分配。
 
-1. 使用 **Unity 6000.3.9f1** 打开项目。
-2. 打开 `Assets/Scenes/SwarmSandbox.unity`，进入 Play Mode。
-3. 从 HUD 观察 logic tick、CPU/tick、GC、`Path req` 预算/积压、cache hit/miss、`replay A*`、邻居/ORCA line、状态哈希和 rollback。
+## Quick start
 
-| 按键 | 行为 |
+1. 使用 **Unity 6000.3.9f1** 打开工程。
+2. 打开 `Assets/Scenes/SwarmSandbox.unity` 并进入 Play Mode。
+3. 从 HUD 观察 logic tick、CPU/tick、路径预算、空间查询、ORCA、CCD、限幅、状态哈希和 rollback。
+
+| Key | Action |
 |---|---|
 | `Space` | 暂停 / 继续 |
-| `L` | 注入延迟 18 tick 的群组目标指令并回滚重演 |
-| `T` | 加入 600 tick 追帧积压；追帧期间不渲染中间状态 |
-| `K` | 循环 `Uniform Grid radius → KD-Tree radius → KD-Tree exact KNN`；将 `SetSpatialIndexMode` 排入当前 tick 的权威命令时间线，在下一次 logic step 应用，rollback 跨过切换 tick 时会按原序重放 |
+| `L` | 注入延迟 18 tick 的群组目标命令并回滚重演 |
+| `T` | 加入 600 tick 追帧积压；期间跳过中间渲染 |
+| `K` | 循环 `Uniform Grid radius → KD-Tree radius → KD-Tree exact KNN`，以权威命令切换 |
 | `R` | 使用相同 seed 重置世界 |
 | `WASD` / 滚轮 | 平移 / 缩放相机 |
 
-## 自动验证
+## Validation
 
 运行全部 EditMode 测试：
 
@@ -90,7 +81,7 @@ mkdir -p TestResults
   -logFile "$PWD/TestResults/editmode.log"
 ```
 
-运行 10k headless benchmark：
+运行默认 10k headless benchmark：
 
 ```bash
 SWARM_AGENT_COUNT=10000 SWARM_WARMUP_TICKS=8 SWARM_SAMPLE_TICKS=32 \
@@ -100,48 +91,65 @@ SWARM_AGENT_COUNT=10000 SWARM_WARMUP_TICKS=8 SWARM_SAMPLE_TICKS=32 \
   -quit -logFile "$PWD/BenchmarkResults/benchmark.log"
 ```
 
-GitHub Actions 始终执行无需秘密的静态工程检查、校验 benchmark JSON，并上传与当前 commit 绑定的静态证据 artifact。GameCI EditMode job 是可选增强：只有配置 `UNITY_LICENSE`（以及对应 Unity Personal 凭据）并设置仓库变量 `UNITY_CI_ENABLED=true` 后才运行；Release 不能因为该 job 未启用而省略本地 XML 证据。
+运行跨进程 replay 验证：
 
-## 代码地图
+```bash
+./Scripts/run-cross-process-replay.sh
+```
+
+脚本先后启动两个独立 Unity batchmode 进程，生成/校验同一个 replay，并输出：
+
+- `ReplayResults/cross-process.swarmreplay`
+- `ReplayResults/capture.json`
+- `ReplayResults/verify.json`
+- `ReplayResults/latest.md`
+
+`verify.json` 记录独立 PID、逐 checkpoint 比对、最终分层权威哈希，以及对 `AgentPositions[0].X.Raw` 的可控 desync probe。三模式矩阵与证据字段说明见 [`Docs/BENCHMARKING.md`](Docs/BENCHMARKING.md)。发布前应在目标 commit 上重新生成测试、benchmark、replay 和 Player 证据；具体流程见 [`Docs/RELEASE_CHECKLIST.md`](Docs/RELEASE_CHECKLIST.md)。
+
+## Repository map
 
 ```text
 Assets/SwarmSandbox/
-├── Core/FixedPoint          Q16.16、向量与整数数学
-├── Core/Determinism         XorShift32 / FNV-1a
-├── Simulation/ECS           Entity、SoA World、权威路径状态
-├── Simulation/Spatial       Uniform Grid / KD-Tree radius / exact KNN
-├── Simulation/Pathfinding   Grid、Island Map、A*、SharedPath、Path Cache
-├── Simulation/Avoidance     RVO2-style ORCA LP solver
-├── Simulation/Collision     Fixed-point OBB SAT / circle-OBB
-├── Simulation/Netcode       Command Timeline / Snapshot Ring / Rollback
-├── Simulation/Systems       路径预算调度、避障、积分与持久 worker pool
-├── Runtime/Rendering        GraphicsBuffer / RenderMeshIndirect
-├── Runtime/Commercial       YooAsset / HybridCLR 运行时边界
-└── Editor                   场景、测试、benchmark 与管线配置工具
+├── Core/FixedPoint          Q16.16 vectors and integer math
+├── Core/Determinism         PRNG and FNV-1a
+├── Simulation/ECS           Entities, SoA World, authority state
+├── Simulation/Spatial       Uniform Grid, KD-Tree, static-obstacle BVH
+├── Simulation/Pathfinding   Grid, islands, A*, shared path cache
+├── Simulation/Avoidance     Agent and obstacle ORCA constraints
+├── Simulation/Collision     Fixed-point OBB, SAT and swept tests
+├── Simulation/Netcode       Command timeline, snapshots and rollback
+├── Simulation/Replay        Versioned replay format and validation
+├── Simulation/Determinism   Layered hashes and desync diagnostics
+├── Simulation/Systems       Navigation, avoidance, motion and workers
+├── Runtime/Rendering        GraphicsBuffer and indirect rendering
+├── Runtime/Commercial       YooAsset / HybridCLR integration boundary
+└── Editor                   Scene, tests, benchmark and replay tools
 ```
 
-进一步阅读：
+## Design boundaries
 
-- [`Docs/ARCHITECTURE.md`](Docs/ARCHITECTURE.md)：数据流、动态寻路调度与缓存边界
-- [`Docs/DETERMINISM_AND_NETCODE.md`](Docs/DETERMINISM_AND_NETCODE.md)：权威状态、派生路径、Rollback 与追帧
-- [`Docs/INTERVIEW_GUIDE.md`](Docs/INTERVIEW_GUIDE.md)：面试演示路线、复杂度与诚实边界
-- [`Docs/BENCHMARKING.md`](Docs/BENCHMARKING.md)：单模式与三模式矩阵的复现方法、执行策略边界
-- [`Docs/ROADMAP_2027.md`](Docs/ROADMAP_2027.md)：客户端优先的版本顺序与量化门禁
-- [`Docs/COMMERCIAL_PIPELINE.md`](Docs/COMMERCIAL_PIPELINE.md)：YooAsset + HybridCLR 的当前接入范围
-- [`Docs/RELEASE_CHECKLIST.md`](Docs/RELEASE_CHECKLIST.md)：发布前验证、证据附件与口径检查
+- 运动学 limiter 位于 holonomic ORCA 之后；限加速度或限转向可能使最终速度不再严格满足全部 ORCA half-plane。CCD、slide 和 SAT fallback 负责几何安全，但这不等价于 kinodynamic ORCA 的严格可行解。
+- CCD 使用圆半径扩张 OBB 后的 slab sweep。该方法对高速穿越是保守的，但扩张后的方形角会在真实圆角附近产生偏早接触。
+- Swept broadphase 按真实圆形运动包围盒扩张，因此不保证保留只存在于方角 slab 保守区域中的 narrowphase 假阳性；真实 circle-vs-OBB 接触仍由保守 OBB bounds 覆盖。
+- 静态障碍与 BVH 在初始化后不可变。拓扑变化需要重建仿真并开启新的 rollback epoch，当前不能跨 topology epoch 恢复旧快照。
+- BVH 构建只发生在静态初始化阶段，使用确定性排序，最坏 `O(N²)`；剪枝查询最坏 `O(N)`，K 个结果的稳定排序为 `O(K log K)`。
+- KD 查询使用精确 branch pruning，但退化分布下仍可能访问 `O(N)` 节点，不能假定稳定 `O(log N)`。
+- replay 与字段级 diff 已提供可复现和定位工具，但跨 Mono/IL2CPP、ARM64/x64 的完整哈希矩阵仍需由对应平台 artifact 证明。
+- 当前没有真实 UDP/KCP transport、服务器仲裁、输入确认、超 rollback 窗口的 full snapshot recovery 或断线重连协议。
+- Agent 渲染仍由 CPU 每帧上传全部实例；没有 per-instance GPU culling、Hi-Z 或 HLOD。
+
+## Documentation
+
+- [`Docs/ARCHITECTURE.md`](Docs/ARCHITECTURE.md)：权威数据流、导航、避障、碰撞与内存边界
+- [`Docs/DETERMINISM_AND_NETCODE.md`](Docs/DETERMINISM_AND_NETCODE.md)：确定性契约、snapshot、replay 与 desync diagnostics
+- [`Docs/TECHNICAL_WALKTHROUGH.md`](Docs/TECHNICAL_WALKTHROUGH.md)：架构审阅路径与复现实验
+- [`Docs/BENCHMARKING.md`](Docs/BENCHMARKING.md)：基准入口、输出字段与解释边界
+- [`Docs/ROADMAP_2027.md`](Docs/ROADMAP_2027.md)：后续版本顺序与量化门禁
+- [`Docs/COMMERCIAL_PIPELINE.md`](Docs/COMMERCIAL_PIPELINE.md)：YooAsset + HybridCLR 当前接入范围
+- [`Docs/RELEASE_CHECKLIST.md`](Docs/RELEASE_CHECKLIST.md)：发布前验证与证据清单
+- [`Docs/RELEASE_NOTES_v0.3.0.md`](Docs/RELEASE_NOTES_v0.3.0.md)：v0.3.0 变化、验证入口与已知限制
 - [`CHANGELOG.md`](CHANGELOG.md)：版本变更记录
-
-## 明确边界
-
-- 当前网络能力是本地命令时间线、延迟注入与 rollback 实验室；**没有**真实 UDP/KCP、服务器仲裁、输入确认或断线重连协议。
-- 地图 topology/revision 仍是仿真外部 epoch 数据，没有进入 snapshot；拓扑切换后必须调用 `ResetHistory()` 开启新的 rollback epoch，不能跨拓扑版本回滚。
-- 导航请求与本地演示命令目前使用 32-bit 有符号 sequence；到 `int.MaxValue` 后会归零，但排序尚未实现 RFC 1982 式回绕比较。短时实验不会触发，真实长生命周期服务器必须改为带 epoch 的序号或明确的模序比较。
-- 当前没有跨进程 replay、Desync Diff 或跨 Mono/IL2CPP、ARM64/x64 哈希矩阵；不能宣称跨平台逐位一致。
-- ORCA 当前只生成 Agent-Agent 约束；静态障碍由 A* 栅格与移动后的 circle-vs-OBB 修正处理，没有动态障碍 ORCA line 或 CCD。
-- KD-Tree radius / KNN 是 branch-pruned exact query，但最坏仍可能访问 `O(N)` 节点，不能笼统宣称稳定 `O(log N)`。
-- Agent 是一个 indirect draw command，但 CPU 仍逐帧上传全部实例；当前只有整批 bounds culling，没有 per-instance GPU culling、Hi-Z 或 HLOD。
-- YooAsset / HybridCLR 已完成工程配置和加载边界；目标平台的 Installer、Generate/All、IL2CPP、Bundle/CDN 与失败回滚闭环尚未完成。
 
 ## License
 
-项目自有源码使用 [MIT](LICENSE)；Unity、YooAsset 与 HybridCLR 适用各自许可证，详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+项目自有源码使用 [MIT License](LICENSE)。RVO2-derived fixed-point adaptation、Unity、YooAsset 与 HybridCLR 适用各自许可证，详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。

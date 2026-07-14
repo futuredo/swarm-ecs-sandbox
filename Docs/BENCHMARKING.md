@@ -1,15 +1,13 @@
 # Benchmarking
 
-`SwarmBenchmarkRunner` measures a complete deterministic logic tick: navigation scheduling, neighbor query, ORCA, movement integration and static-obstacle correction. It does **not** measure rendering, and it is not an isolated spatial-index microbenchmark.
+`SwarmBenchmarkRunner` measures a complete deterministic logic tick: navigation scheduling, spatial-index rebuild/query, obstacle and Agent ORCA, kinematic limiting, swept movement and final collision recovery. It does not measure rendering and is not an isolated data-structure microbenchmark.
 
-## Single spatial-index mode
+## Single runtime mode
 
-The single-mode entry point keeps the existing `BenchmarkResults/latest.json` and `latest.md` outputs. `UniformGrid` remains the default when no selector is supplied.
-
-Use an environment variable:
+Without a selector, the runner uses `UniformGrid` and writes `BenchmarkResults/latest.json` plus `latest.md`.
 
 ```bash
-SWARM_SPATIAL_INDEX=KdTreeRadius \
+SWARM_SPATIAL_INDEX=UniformGrid \
 SWARM_AGENT_COUNT=10000 \
 SWARM_WARMUP_TICKS=8 \
 SWARM_SAMPLE_TICKS=32 \
@@ -19,65 +17,81 @@ SWARM_SAMPLE_TICKS=32 \
   -quit -logFile "$PWD/BenchmarkResults/benchmark.log"
 ```
 
-Or use a command-line selector, which takes precedence over the environment variable:
-
-```bash
-"/Applications/Unity/Hub/Editor/6000.3.9f1/Unity.app/Contents/MacOS/Unity" \
-  -batchmode -nographics -projectPath "$PWD" \
-  -executeMethod SwarmECS.Editor.SwarmBenchmarkRunner.RunFromCommandLine \
-  -swarmSpatialIndex KdTreeKNearest \
-  -quit -logFile "$PWD/BenchmarkResults/benchmark.log"
-```
-
-Canonical selectors are `UniformGrid`, `KdTreeRadius` and `KdTreeKNearest`. The parser also accepts `Grid`, `KdTree`, `KdRadius`, `KdKnn` and `Knn`, ignoring case, spaces, `_` and `-`.
+`-swarmSpatialIndex <mode>` overrides `SWARM_SPATIAL_INDEX`. Canonical modes are `UniformGrid`, `KdTreeRadius` and `KdTreeKNearest`; parsing also accepts the short aliases defined by the runner.
 
 ## Comparable three-mode matrix
 
 Close any Unity Editor currently holding the project, then run:
 
 ```bash
+SWARM_AGENT_COUNT=10000 \
+SWARM_WARMUP_TICKS=8 \
+SWARM_SAMPLE_TICKS=32 \
 ./Scripts/run-spatial-index-benchmark-matrix.sh
 ```
 
-Optional environment variables:
-
 | Variable | Default | Purpose |
 |---|---:|---|
-| `UNITY_EXECUTABLE` | Editor version recorded by the project | Select a Unity binary |
-| `SWARM_AGENT_COUNT` | `10000` | Agent count used by all three runs |
-| `SWARM_WARMUP_TICKS` | `8` | Per-mode warmup ticks |
-| `SWARM_SAMPLE_TICKS` | `24` | Per-mode measured ticks |
-| `SWARM_BENCHMARK_OUTPUT_DIR` | `BenchmarkResults` | Output directory, absolute or project-relative |
+| `UNITY_EXECUTABLE` | project Editor version | Select a Unity binary |
+| `SWARM_AGENT_COUNT` | `10000` | Agent count shared by all modes |
+| `SWARM_WARMUP_TICKS` | `8` | Warmup per mode |
+| `SWARM_SAMPLE_TICKS` | `24` | Measured ticks per mode |
+| `SWARM_BENCHMARK_OUTPUT_DIR` | `BenchmarkResults` | Absolute or project-relative output directory |
 
-The matrix entry point creates a fresh `SwarmWorld` for each mode. All three runs use the same formation seed, `PortfolioDefault` simulation values, agent count, warmup count and sample count. Each mode is warmed independently before measurement. The fixed run order is `UniformGrid → KdTreeRadius → KdTreeKNearest` and is recorded in JSON.
+Every mode starts from a new World with the same seed, default simulation values, Agent count and sample policy. The fixed order is `UniformGrid → KdTreeRadius → KdTreeKNearest` and is recorded in JSON.
 
-Outputs:
+Uniform Grid currently uses its persistent worker pool when available. Both KD avoidance paths run on the caller thread. The matrix therefore compares current end-to-end runtime modes; timing differences include both query structure and execution policy.
 
-- `BenchmarkResults/spatial-index-matrix.json`: machine-readable settings and per-mode results.
-- `BenchmarkResults/spatial-index-matrix.md`: review-friendly comparison table.
-- `BenchmarkResults/spatial-index-matrix.log`: Unity batchmode log; ignored by Git.
+## Obstacle-approach sample
 
-The JSON records shared Q16.16 configuration values and execution policy so that results cannot silently mix scenarios. At present, the Uniform Grid runtime uses its persistent worker pool when available, while both KD avoidance paths run on the caller thread. Therefore this matrix compares the performance of the **current end-to-end runtime modes**; it must not be presented as an apples-to-apples single-threaded data-structure comparison.
+The default 8/32 run can finish before large formations reach the central obstacles. A longer warmup/sample run is useful for exercising obstacle lines and collision telemetry:
 
-Each result records two hashes:
+```bash
+SWARM_AGENT_COUNT=10000 \
+SWARM_WARMUP_TICKS=200 \
+SWARM_SAMPLE_TICKS=120 \
+SWARM_BENCHMARK_OUTPUT_DIR="$PWD/BenchmarkResults/obstacle-approach" \
+"/Applications/Unity/Hub/Editor/6000.3.9f1/Unity.app/Contents/MacOS/Unity" \
+  -batchmode -nographics -projectPath "$PWD" \
+  -executeMethod SwarmECS.Editor.SwarmBenchmarkRunner.RunFromCommandLine \
+  -quit -logFile "$PWD/BenchmarkResults/obstacle-approach/benchmark.log"
+```
 
-- `stateHash` is the full authoritative hash. It includes `SpatialIndexMode`, so values from different modes are expected to differ even when every other authoritative field is identical.
-- `canonicalSpatialComparisonHash` temporarily normalizes only `SpatialIndexMode` to `UniformGrid` while hashing, then restores the original mode. Matching values are evidence that the remaining authoritative end state is equivalent for that exact seed/config/run; they are not a proof for every input or platform.
+This is a scenario-duration change, not a directly comparable timing replacement for the tracked 8/32 matrix. Its purpose is to show that obstacle ORCA/CCD counters become active and that normal movement does not depend on repeated SAT fallback.
 
-In the tracked 10k, 8-warmup + 32-sample matrix, Uniform Grid radius and KD radius both produce canonical hash `0x4BD5680667C14261`, which proves equivalence for this benchmark input. KD exact KNN happens to produce the same canonical hash in this scenario as well, but its neighbor-selection semantics differ, so that observation must not be generalized to other densities, radii or trajectories.
+## Output schema
 
-## Tracked v0.2.1 evidence
+Each result contains:
 
-The current `latest.json` is a separate Uniform Grid invocation: average `19.919240625` ms, P95 `24.5924` ms, min/max `17.0747/26.0361` ms, current-thread allocation `0 B`, and full/canonical hash `0x4BD5680667C14261`.
+| Group | Fields |
+|---|---|
+| Environment | Unity version, timestamp, processor, logical cores, graphics device |
+| Workload | Agent count, warmup/sample ticks, spatial mode and avoidance execution |
+| Timing | average, P95, min and max milliseconds |
+| Allocation | `managedBytesAcrossSamples` |
+| Navigation | request budget, cache capacity, island count, shared waypoint count |
+| Avoidance | obstacle/Agent ORCA line totals and obstacle-BVH query count |
+| Collision | BVH query/candidate totals, CCD sweep hits, SAT fallback recoveries, maximum residual penetration raw |
+| Motion | acceleration-limited and turn-limited Agent totals |
+| Identity | `ConfigHash`, full authority hash and canonical spatial-comparison hash |
 
-The current matrix records:
+The counters are sample-window totals, not per-tick averages. A zero obstacle-line/candidate count in a short sample means the formation did not enter the query range during that window; it does not mean the feature is disabled.
 
-| Mode | Average (ms) | P95 (ms) | Min / max (ms) | Current-thread GC |
-|---|---:|---:|---:|---:|
-| Uniform Grid radius | 18.73074375 | 21.2342 | 16.8525 / 22.6702 | 0 B |
-| KD-Tree radius | 114.1174875 | 125.944 | 104.8276 / 127.9858 | 0 B |
-| KD-Tree exact KNN | 98.874775 | 108.3109 | 90.9214 / 109.7333 | 0 B |
+## Hash interpretation
 
-The KD exact KNN implementation uses a preallocated 65-bit squared-distance representation, so candidate ordering and split-plane pruning cover the full two-dimensional Q16.16 coordinate domain without per-query managed allocation. This implementation fact does not change the execution-policy caveat above: both KD modes currently run avoidance on the caller thread.
+- `configHash` identifies all result-affecting simulation parameters.
+- `stateHash` includes the authoritative `SpatialIndexMode`; different modes are expected to have different full hashes.
+- `canonicalSpatialComparisonHash` temporarily normalizes only `SpatialIndexMode` during hashing and then restores it.
 
-`managedBytesAcrossSamples` uses `GC.GetAllocatedBytesForCurrentThread()`. It proves only the sampling thread's allocation delta and does not yet replace an all-worker allocation capture. Headless `Null Device` results also cannot be used as evidence of rendered FPS or mobile performance.
+Matching canonical values show equivalent remaining authority state for that exact seed/config/run. They do not prove equivalence for every density, radius, trajectory, runtime or architecture. Exact KNN has different neighbor-selection semantics from bounded radius modes even when one sampled scenario converges to the same final value.
+
+## Interpretation limits
+
+- `-nographics` reports `Null Device`; no rendered FPS or GPU conclusion can be derived.
+- `GC.GetAllocatedBytesForCurrentThread()` covers only the sampling thread. It does not prove that every background worker allocated 0 B.
+- Short samples do not establish thermal stability or long-run P99.
+- KD branch pruning is distribution-dependent and has `O(N)` worst-case traversal.
+- Static-obstacle BVH build is one-time deterministic work with worst-case `O(N²)` sorting; query worst case is `O(N)`, and ordering K results costs `O(K log K)`.
+- Timing evidence must name Unity, hardware, graphics device, workload, execution policy and source commit.
+
+Tracked machine-readable results live in [`BenchmarkResults/latest.json`](../BenchmarkResults/latest.json) and [`BenchmarkResults/spatial-index-matrix.json`](../BenchmarkResults/spatial-index-matrix.json). Raw Unity logs remain local because they can contain host names, private network details and absolute paths; a public Release should attach the tracked JSON/Markdown and only privacy-scrubbed log excerpts when a diagnostic trace is necessary.

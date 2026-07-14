@@ -1,6 +1,6 @@
 # Swarm ECS spatial-index benchmark matrix
 
-- UTC: 2026-07-14T12:21:16.9300660Z
+- UTC: 2026-07-14T14:07:27.8084880Z
 - Unity: 6000.3.9f1
 - CPU: Apple M5 Pro (15 logical cores)
 - GPU: Null Device
@@ -10,11 +10,11 @@
 - Max neighbors: 8
 - Warmup/sample ticks per mode: 8/32
 
-| Spatial index | Avoidance execution | Average (ms) | P95 (ms) | Min (ms) | Max (ms) | Current-thread GC (B) | Full state hash | Canonical comparison hash |
-|---|---|---:|---:|---:|---:|---:|---|---|
-| UniformGrid | Caller + 14 background workers | 18.731 | 21.234 | 16.853 | 22.670 | 0 | `0x4BD5680667C14261` | `0x4BD5680667C14261` |
-| KdTreeRadius | Caller thread | 114.117 | 125.944 | 104.828 | 127.986 | 0 | `0xE8AE71279C8EC54C` | `0x4BD5680667C14261` |
-| KdTreeKNearest | Caller thread | 98.875 | 108.311 | 90.921 | 109.733 | 0 | `0x008726C93F9563E3` | `0x4BD5680667C14261` |
+| Spatial index | Avoidance execution | Average (ms) | P95 (ms) | Min (ms) | Max (ms) | Current-thread GC (B) | Config hash | Full state hash | Canonical comparison hash |
+|---|---|---:|---:|---:|---:|---:|---|---|---|
+| UniformGrid | Caller + 14 background workers | 15.396 | 17.185 | 14.125 | 17.562 | 0 | `0x90EFFCAE3189FF28` | `0x2F7882ADEB0C9076` | `0x2F7882ADEB0C9076` |
+| KdTreeRadius | Caller thread | 136.997 | 150.894 | 126.704 | 152.235 | 0 | `0x30EAA8B687BFBBB9` | `0xD05619100109D013` | `0x2F7882ADEB0C9076` |
+| KdTreeKNearest | Caller thread | 123.118 | 133.478 | 114.844 | 134.728 | 0 | `0xD0E554BEDDF5784A` | `0x3B79FF50D217BA38` | `0x2F7882ADEB0C9076` |
 
 This is an end-to-end logic-tick comparison of the current runtime modes, not an isolated spatial-query microbenchmark. UniformGrid uses its persistent worker pool when available; both KD modes currently execute avoidance on the caller thread.
 

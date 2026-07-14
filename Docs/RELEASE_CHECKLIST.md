@@ -1,61 +1,45 @@
-# v0.2.1 发布检查清单
+# v0.3.0 release checklist
 
-本清单用于把本地 `Navigation Completeness` 候选变成可公开审查的 Release。它不要求付费服务，也不依赖 CI 中存在 Unity License；Unity 测试和 Player 构建可以在本地已激活的 Unity 6000.3.9f1 完成，再把原始证据附加到 Release。
+This checklist binds source, tests, benchmarks, replay output and Player artifacts to one immutable commit. Unity tests and Player builds may run on a locally activated Unity 6000.3.9f1 installation; the default hosted workflow performs static validation only.
 
-## 1. 冻结范围与 Git 真值
+## 1. Freeze scope and source identity
 
-- [ ] 确认目标版本为 `v0.2.1`，不混入 v0.2.2 的 obstacle ORCA/CCD 实验。
-- [ ] `git status --short` 中每个文件都属于本次发布，未误带 Library、Temp、Logs、Builds、TestResults 或私密配置。
-- [ ] 检查新增 Unity asset 与对应 `.meta` 成对存在。
-- [ ] 确认 `ProjectSettings/ProjectVersion.txt` 为 Unity 6000.3.9f1，`Packages/manifest.json` 依赖仍使用固定版本。
-- [ ] 确认 `ProjectSettings/ProjectSettings.asset` 的 `bundleVersion` 为 `0.2.1`。
-- [ ] 记录待发布 commit：`git rev-parse HEAD`。所有测试、benchmark、Player 和 Release notes 必须引用同一 commit；如果验证后代码变化，则全部重跑。
+- [ ] Confirm every `git status --short` entry belongs to v0.3.0.
+- [ ] Confirm every new Unity asset has its matching `.meta` file.
+- [ ] Reject generated `Library`, `Temp`, `Obj`, `Builds`, `Logs`, `UserSettings`, `TestResults`, HybridCLR local data and private credentials.
+- [ ] Confirm `ProjectSettings/ProjectVersion.txt` records Unity 6000.3.9f1 and package dependencies remain pinned.
+- [ ] Confirm `bundleVersion` and release documentation use `0.3.0`.
+- [ ] Record `git rev-parse HEAD`; rerun every artifact-producing step after any source change.
 
-## 2. 无 Unity License 的静态检查
-
-以下检查可在本地或默认 GitHub Actions 中执行：
+## 2. Static validation
 
 ```bash
 find Assets Packages -type f \( -name '*.json' -o -name '*.asmdef' \) -print0 \
   | xargs -0 -n1 jq empty
 
-git ls-files | grep -E '^(Library|Temp|Obj|Build|Builds|Logs|UserSettings|MemoryCaptures|Recordings|TestResults)/' \
+git ls-files | grep -E \
+  '^(Library|Temp|Obj|Build|Builds|Logs|UserSettings|MemoryCaptures|Recordings|TestResults)/' \
   && exit 1 || true
 
 jq -e '
   .unityVersion == "6000.3.9f1" and
   .agents == 10000 and
-  .sampleTicks > 0 and
+  .warmupTicks == 8 and
+  .sampleTicks == 32 and
+  .graphicsDevice == "Null Device" and
   .averageMilliseconds > 0 and
   .p95Milliseconds > 0 and
-  (.stateHash | startswith("0x")) and
-  (.canonicalSpatialComparisonHash | startswith("0x"))
+  (.configHash | test("^0x[0-9A-F]{16}$")) and
+  (.stateHash | test("^0x[0-9A-F]{16}$")) and
+  (.canonicalSpatialComparisonHash | test("^0x[0-9A-F]{16}$"))
 ' BenchmarkResults/latest.json
-
-jq -e '
-  .unityVersion == "6000.3.9f1" and
-  .agents == 10000 and
-  .runOrder == ["UniformGrid", "KdTreeRadius", "KdTreeKNearest"] and
-  (.results | length) == 3 and
-  ([.results[].spatialIndex] == .runOrder) and
-  (all(.results[];
-    .sampleTicks > 0 and
-    .averageMilliseconds > 0 and
-    .p95Milliseconds > 0 and
-    (.stateHash | startswith("0x")) and
-    (.canonicalSpatialComparisonHash | startswith("0x"))
-  )) and
-  (.results[0].canonicalSpatialComparisonHash == .results[1].canonicalSpatialComparisonHash)
-' BenchmarkResults/spatial-index-matrix.json
 ```
 
-- [ ] GitHub `Static project validation` 通过。
-- [ ] 下载 `release-evidence-<commit>` artifact，确认其中 benchmark 与文档属于待发布 commit。
-- [ ] 不把绿色静态 job 描述成“Unity EditMode 已在 CI 通过”。
+- [ ] GitHub `Static project validation` passes.
+- [ ] Download `release-evidence-<commit>` and verify that its documents/results belong to the frozen commit.
+- [ ] Do not describe a green static job as a hosted Unity test run.
 
-## 3. Unity EditMode 证据
-
-在项目根目录运行：
+## 3. Unity EditMode evidence
 
 ```bash
 mkdir -p TestResults
@@ -66,12 +50,14 @@ mkdir -p TestResults
   -logFile "$PWD/TestResults/editmode.log"
 ```
 
-- [ ] `TestResults/editmode.xml` 的 `result="Passed"`、`passed="77"`、`failed="0"`、`skipped="0"`，且用例数与 README 一致；duration 是本次运行的环境数据，不写死为历史值。
-- [ ] 检查 `editmode.log` 没有编译错误、未处理异常或测试发现失败。
-- [ ] 保留 XML 和 log，不提交到仓库；Release 时作为原始附件上传。
-- [ ] Release notes 标注这是本地 Unity 结果还是可选 GameCI 结果，不混淆两者。
+- [ ] XML reports `Passed` with zero failed/skipped cases.
+- [ ] Log has no compilation error, unhandled exception or test-discovery failure.
+- [ ] Coverage includes fixed-point math, navigation/islands/cache, three spatial modes, obstacle ORCA, immutable BVH, high-speed CCD, SAT fallback, motion limits, rollback, replay validation and field-level desync diagnostics.
+- [ ] Keep raw XML/log outside Git history; they may contain user paths, host names and network details.
+- [ ] Generate a machine-readable test summary and privacy-scrubbed excerpt for public attachments.
+- [ ] Release notes state whether the result came from local Unity or the optional licensed workflow.
 
-## 4. 同 commit Benchmark
+## 4. Same-commit benchmarks
 
 ```bash
 SWARM_AGENT_COUNT=10000 SWARM_WARMUP_TICKS=8 SWARM_SAMPLE_TICKS=32 \
@@ -84,55 +70,71 @@ SWARM_AGENT_COUNT=10000 SWARM_WARMUP_TICKS=8 SWARM_SAMPLE_TICKS=32 \
 ./Scripts/run-spatial-index-benchmark-matrix.sh
 ```
 
-- [ ] `latest.json` / `.md` 与 `spatial-index-matrix.json` / `.md` 数值一致并进入发布 commit。
-- [ ] 记录 Unity、CPU、logical cores、Graphics Device、agent count、spatial mode、warmup/sample、path budget/cache 和 state hash。
-- [ ] 明确 `Null Device` 只证明纯逻辑 tick，不换算成渲染 FPS 或移动端结论。
-- [ ] 把两个 benchmark log 作为 Release 附件，不提交仓库。
-- [ ] 三模式矩阵保持相同 formation seed、fixed delta、neighbor distance、max neighbors、warmup/sample；Release notes 明确 Uniform Grid 使用 caller + 14 workers，而两个 KD 模式当前使用 caller thread。
-- [ ] 把三模式结果描述成完整 runtime-mode 对照，不描述成孤立 spatial-query 微基准；full hash 包含 `SpatialIndexMode`，跨模式不同是预期行为。
-- [ ] 核对 Grid radius 与 KD radius 的 canonical hash 均为 `0x4BD5680667C14261`，说明本次相同输入下其余权威状态等价；KD exact KNN 此次也相同只作为场景观察，不写成不同选邻语义对所有输入都等价。
-- [ ] 确认测试覆盖完整二维 Q16.16 域的无分配 65-bit exact KNN，以及 600 条命令下按 rollback window 回收 timeline 过期前缀。
+- [ ] `latest.json/.md` and `spatial-index-matrix.json/.md` contain matching values and are committed.
+- [ ] Record Unity, CPU, logical cores, Graphics Device, workload, spatial mode, worker policy and timing distribution.
+- [ ] Validate `ConfigHash`, full hash and canonical comparison hash formats.
+- [ ] Validate obstacle/Agent ORCA, avoidance/collision BVH, CCD, SAT fallback, residual depth and motion-limit counters.
+- [ ] Keep short default and long obstacle-approach runs separate; do not compare their timings as the same workload.
+- [ ] State that `Null Device` measures logic only and allocation covers only the sampling thread.
+- [ ] Keep raw benchmark logs local; publish tracked JSON/Markdown and only privacy-scrubbed excerpts when needed.
 
-## 5. Player 与演示
+## 5. Replay and desync evidence
 
-- [ ] 用待发布 commit 构建 macOS Universal Player（Mach-O `x86_64 + arm64`）；记录 Mono backend 与是否为 Development Build。
-- [ ] 启动验证场景，至少演示三种空间模式切换、late-command rollback、catch-up、跨岛不可达与动态目标合并。
-- [ ] 运行 5–10 分钟，检查 Unity Player log 无异常退出、重复报错或持续 GC 警告。
-- [ ] 压缩 Player，并生成 `shasum -a 256 <archive>`。
-- [ ] 用 `file` 检查 Universal Mach-O 架构，用 `codesign -dv --verbose=4 <App>` 记录 ad-hoc 签名状态。
-- [ ] Release notes 明确 Player 为 ad-hoc 签名且**未 notarize**；列出 macOS Gatekeeper 可能拦截下载包的限制，不描述成正式发行签名包。
-- [ ] 录制 30–90 秒视频；HUD 数值与 Release notes 使用同一版本。
+```bash
+./Scripts/run-cross-process-replay.sh
+```
 
-Player smoke test 只证明该构建可启动和交互，不等于跨平台确定性、正式弱网或长稳性能验收。
+- [ ] Script writes `ReplayResults/cross-process.swarmreplay`, `capture.json`, `verify.json` and `latest.md`.
+- [ ] `capture.json.replaySha256` matches the replay file and `verify.json.replaySha256`.
+- [ ] Capture/verify process IDs differ and `independentProcess` is `true`.
+- [ ] `crcAndSchemaValidated` and `allCheckpointsMatched` are `true`; matched checkpoint count equals the capture count.
+- [ ] Logic/config hashes and final layered hashes agree between capture and verify reports.
+- [ ] The desync probe identifies `AgentPositions`, entity `0`, field `X.Raw`, with distinct expected/actual raw values.
+- [ ] Compare every recorded checkpoint and retain the tracked machine-readable output.
+- [ ] Keep capture/verify logs local unless a privacy scan confirms a scrubbed copy is safe to publish.
+- [ ] Corrupt header, length, enum/config identity, payload and checksum in tests; every malformed input must fail before simulation mutation.
+- [ ] Deliberately mutate one authority scalar and confirm the diagnostic reports the expected component, entity/group, field and raw values.
+- [ ] Do not claim backend/architecture compatibility unless the same replay artifact was executed on every named target.
 
-## 6. 文档口径检查
+## 6. Player smoke test
 
-- [ ] README 的“已实现”都能指向代码和测试；未来目标只存在于 ROADMAP。
-- [ ] 明确请求调度是 4 个群组固定槽与同组目标合并，不称为任意容量通用队列。
-- [ ] 明确 10,000 Agent 共享 4 条宏观路线，不写成 10,000 次独立 A*。
-- [ ] 明确 ORCA 当前只有 Agent-Agent lines；静态墙体 obstacle lines、broadphase、CCD 未完成。
-- [ ] 明确 indirect rendering 仍由 CPU 上传全部实例，没有 per-instance GPU culling、Hi-Z 或 HLOD。
-- [ ] 明确当前没有真实 UDP Server、双 Client、跨进程 replay、Desync Diff、超窗快照恢复或生产热更新闭环。
-- [ ] 明确地图 topology/revision 尚未进入 snapshot，切换拓扑后必须 `ResetHistory()` 开启新 epoch，不能跨 topology epoch rollback。
-- [ ] 明确 32-bit sequence 的 `int.MaxValue` 回绕尚未实现模序比较，不能把当前短时实验室直接描述为长期在线协议。
-- [ ] 不写“KD 查询稳定 O(log N)”“移动端 60 FPS”“跨平台零误差”“生产级网络”等未验收结论。
+- [ ] Build the intended macOS architecture/backend from the frozen commit and record Development Build state.
+- [ ] Launch the target scene and exercise spatial-mode switching, late-command rollback, catch-up and obstacle interaction.
+- [ ] Run 5–10 minutes; inspect Player log for repeated exceptions or abnormal exit.
+- [ ] Archive the Player and generate SHA-256.
+- [ ] Record Mach-O architectures and signing/notarization state exactly.
+- [ ] Treat smoke launch as build validation, not network, cross-platform or long-run performance evidence.
 
-## 7. GitHub Release
+## 7. Documentation audit
 
-- [ ] 将 `CHANGELOG.md` 中候选条目提升为 `## [0.2.1] - YYYY-MM-DD`。
-- [ ] 创建 annotated tag `v0.2.1`，确保 tag 指向已验证 commit。
-- [ ] Release notes 包含：目的、已实现、运行方式、实测表、证据环境、已知限制和下一阶段 v0.2.2。
-- [ ] 上传 `editmode.xml`、`editmode.log`、`latest.json`、`latest.md`、`spatial-index-matrix.json`、`spatial-index-matrix.md`、两个 benchmark log、Player archive、SHA-256 和演示视频/链接。
-- [ ] 从干净临时目录克隆 tag，按照 README 至少完成一次打开/运行或静态复核。
-- [ ] 发布后检查 GitHub 默认分支 README、Release tag、附件与下载链接一致。
+- [ ] README capabilities point to code/tests or same-commit artifacts.
+- [ ] Navigation is described as four bounded group slots and four shared macro paths.
+- [ ] Obstacle ORCA, immutable BVH, conservative CCD, limiter ordering and SAT fallback boundaries are explicit.
+- [ ] BVH build/query/result-order complexity is stated without assuming stable logarithmic queries.
+- [ ] Static topology changes start a new rollback epoch.
+- [ ] Replay/diagnostics are not described as real transport or completed platform compatibility.
+- [ ] Current-thread allocation is not generalized to all workers.
+- [ ] Indirect rendering is not described as per-instance GPU culling.
+- [ ] YooAsset/HybridCLR integration is not described as a completed production update service.
 
-## 8. 发布后回退条件
+## 8. GitHub Release
 
-发现以下任一情况时先标记 Release 为 pre-release 或撤下二进制，修复后以新 patch 版本重新发布，不移动已有 tag：
+- [ ] Create annotated tag `v0.3.0` at the frozen commit.
+- [ ] Use [`RELEASE_NOTES_v0.3.0.md`](RELEASE_NOTES_v0.3.0.md) as the release-note base and add the final commit/test/environment values.
+- [ ] Upload the scrubbed test summary, benchmark JSON/Markdown, replay/input/output, Player archive/screenshot and checksum.
+- [ ] Scan every attachment for user names, absolute local paths, host names, private IPs, credentials and build-machine metadata.
+- [ ] Clone the tag into a clean directory and repeat the documented static checks plus at least one runnable verification path.
+- [ ] Verify the default-branch README, tag, Release text and attachment names after publishing.
 
-- 证据或 Player 并非来自 tag commit；
-- 依赖无法从固定版本恢复；
-- 测试 XML 与 README 数量/结论不一致；
-- benchmark JSON 与 Markdown 不一致；
-- 二进制 SHA-256 不匹配；
-- 文档把未完成能力写成已经验收。
+## 9. Rollback criteria
+
+Mark a Release as pre-release or withdraw affected binaries and publish a new patch version if:
+
+- an artifact was not built from the tag commit;
+- pinned dependencies cannot be restored;
+- the test summary and release text disagree;
+- benchmark JSON and Markdown disagree;
+- replay or Player checksum does not match;
+- documents report an unverified capability as completed.
+
+Do not move an existing public tag to repair evidence.
