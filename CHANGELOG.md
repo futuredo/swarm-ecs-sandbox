@@ -28,7 +28,7 @@
 
 #### Evidence boundary
 
-- 2026-07-14 在 v0.2.1 源码上本地运行 Unity 6000.3.9f1 EditMode：77/77 Passed，0 failed/skipped，0.9254662 秒。`TestResults/editmode.xml` 默认不入库，正式发布时作为 Release artifact 上传。
+- 2026-07-14 在 v0.2.1 源码上本地运行 Unity 6000.3.9f1 EditMode：77/77 Passed，0 failed/skipped。`TestResults/editmode.xml` 默认不入库，正式发布时作为 Release artifact 上传；耗时以附件中的对应运行记录为准。
 - 仓库跟踪的 `BenchmarkResults/latest.json` 为 Apple M5 Pro、10,000 Agent、8 warmup + 32 sample、Null Device 的短时纯逻辑结果：Uniform Grid 平均 19.919240625 ms、P95 24.5924 ms、17.0747/26.0361 ms min/max、current-thread 0 B，full/canonical hash 均为 `0x4BD5680667C14261`。
 - `BenchmarkResults/spatial-index-matrix.json` 在相同 formation seed/config 下对照三个完整模式：Uniform Grid 18.73074375/21.2342 ms、KD radius 114.1174875/125.944 ms、KD exact KNN 98.874775/108.3109 ms（average/P95）；min/max 分别为 16.8525/22.6702、104.8276/127.9858、90.9214/109.7333 ms。Uniform Grid 使用 caller + 14 workers，KD 当前使用 caller thread，因此这是端到端 runtime-mode 对照，不是隔离查询结构的微基准。
 - 三模式 full hash 分别为 `0x4BD5680667C14261`、`0xE8AE71279C8EC54C`、`0x008726C93F9563E3`，差异来自 full hash 包含权威 `SpatialIndexMode`；只归一化该字段后的 canonical hash 均为 `0x4BD5680667C14261`。Grid/KD radius 的一致值证明本次基准输入下权威结果等价；KNN 的一致值仅是本场景观察，不能推广到所有输入。

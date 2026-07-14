@@ -9,7 +9,7 @@
 ## 发布与证据状态
 
 - 当前公开版本为 `v0.2.1 Navigation Completeness`；只有绑定具体 commit 的 Git tag、GitHub Release 和附件才作为公开证据，分支或工作树中的内容不计入发布能力。
-- `BenchmarkResults/latest.json` / `latest.md` 与 `spatial-index-matrix.json` / `.md` 是仓库跟踪的短时 headless 结果。2026-07-14 在 v0.2.1 源码上本地运行完整 EditMode：**77 / 77 Passed，0 failed/skipped**（0.9254662 秒）；原始 `TestResults/editmode.xml` 作为 Release 附件公开。
+- `BenchmarkResults/latest.json` / `latest.md` 与 `spatial-index-matrix.json` / `.md` 是仓库跟踪的短时 headless 结果。2026-07-14 在 v0.2.1 源码上本地运行完整 EditMode：**77 / 77 Passed，0 failed/skipped**；原始 `TestResults/editmode.xml` 作为 Release 附件公开，耗时以附件中的对应运行记录为准。
 - 默认 GitHub Actions 只做无需 Unity License 的静态校验并归档仓库内 benchmark；可选 GameCI job 只有显式配置后才运行 Unity 测试。绿色静态检查不能被描述成“远端 Unity EditMode 已通过”。
 - 发布前检查与证据清单见 [`Docs/RELEASE_CHECKLIST.md`](Docs/RELEASE_CHECKLIST.md)，版本变化见 [`CHANGELOG.md`](CHANGELOG.md)。
 
