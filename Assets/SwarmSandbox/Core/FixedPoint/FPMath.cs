@@ -5,6 +5,8 @@ namespace SwarmECS.FixedPoint
     /// <summary>Allocation-free deterministic helpers for the fixed-point simulation.</summary>
     public static class FPMath
     {
+        private static readonly FP NormalizationInwardScale = FP.FromRaw(FP.OneRaw - 2);
+
         public static FP Abs(FP value) => FP.Abs(value);
 
         public static FP Min(FP left, FP right) => FP.Min(left, right);
@@ -36,6 +38,36 @@ namespace SwarmECS.FixedPoint
             ulong radicand = (ulong)(uint)value.Raw << FP.FractionalBits;
             ulong root = IntegerSqrt(radicand);
             return FP.FromRaw((int)root);
+        }
+
+        /// <summary>
+        /// Returns the smallest non-negative integer whose square is greater than or
+        /// equal to <paramref name="value"/>. The implementation is integer-only and
+        /// therefore safe for authoritative layout decisions.
+        /// </summary>
+        public static int CeilingIntegerSquareRoot(int value)
+        {
+            if (value < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value));
+            }
+
+            int low = 0;
+            int high = value < 46341 ? value : 46341;
+            while (low < high)
+            {
+                int middle = low + ((high - low) >> 1);
+                if ((long)middle * middle >= value)
+                {
+                    high = middle;
+                }
+                else
+                {
+                    low = middle + 1;
+                }
+            }
+
+            return low;
         }
 
         public static FP Dot(FPVector2 left, FPVector2 right)
@@ -102,8 +134,26 @@ namespace SwarmECS.FixedPoint
                 return fallback;
             }
 
-            FP length = Sqrt(lengthSquared);
-            return length <= threshold ? fallback : value / length;
+            FP maximumComponent = Max(Abs(value.X), Abs(value.Y));
+            if (maximumComponent <= FP.Zero)
+            {
+                return fallback;
+            }
+
+            // Normalize a scaled vector so dot products cannot saturate for large raw
+            // coordinates. Integer sqrt rounds down, therefore bias a rare overshoot
+            // back inside the unit circle by two raw units.
+            FPVector2 scaled = value / maximumComponent;
+            FP length = Sqrt(Dot(scaled, scaled));
+            if (length <= FP.Zero)
+            {
+                return fallback;
+            }
+
+            FPVector2 normalized = scaled / length;
+            return Dot(normalized, normalized) > FP.One
+                ? normalized * NormalizationInwardScale
+                : normalized;
         }
 
         public static FPVector3 NormalizeSafe(FPVector3 value)
@@ -131,8 +181,23 @@ namespace SwarmECS.FixedPoint
                 return fallback;
             }
 
-            FP length = Sqrt(lengthSquared);
-            return length <= threshold ? fallback : value / length;
+            FP maximumComponent = Max(Abs(value.X), Max(Abs(value.Y), Abs(value.Z)));
+            if (maximumComponent <= FP.Zero)
+            {
+                return fallback;
+            }
+
+            FPVector3 scaled = value / maximumComponent;
+            FP length = Sqrt(Dot(scaled, scaled));
+            if (length <= FP.Zero)
+            {
+                return fallback;
+            }
+
+            FPVector3 normalized = scaled / length;
+            return Dot(normalized, normalized) > FP.One
+                ? normalized * NormalizationInwardScale
+                : normalized;
         }
 
         /// <summary>Unclamped linear interpolation.</summary>

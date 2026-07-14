@@ -2,6 +2,7 @@ using System;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using SwarmECS.Simulation.Avoidance;
+using SwarmECS.Simulation.Spatial;
 
 namespace SwarmECS.Simulation.Systems.Parallel
 {
@@ -11,7 +12,11 @@ namespace SwarmECS.Simulation.Systems.Parallel
     /// </summary>
     internal sealed class AvoidanceWorkerScratch
     {
-        public AvoidanceWorkerScratch(int capacity, int maxNeighbors)
+        public AvoidanceWorkerScratch(
+            int capacity,
+            int maxNeighbors,
+            StaticObstacleBvh2D obstacleBroadphase = null,
+            int obstacleSegmentCapacity = 0)
         {
             long requestedQueryResults = (long)maxNeighbors + 1L;
             QueryLimit = requestedQueryResults < capacity
@@ -20,8 +25,11 @@ namespace SwarmECS.Simulation.Systems.Parallel
             QueryEntityIds = new int[QueryLimit];
             QueryDistances = new ulong[QueryLimit];
             Neighbors = new AgentNeighbor[maxNeighbors];
-            Lines = new OrcaLine[maxNeighbors];
-            ProjectionLines = new OrcaLine[maxNeighbors];
+            ObstacleQuery = obstacleBroadphase?.CreateScratch();
+            ObstacleNeighbors = new ObstacleNeighbor[obstacleSegmentCapacity];
+            int lineCapacity = checked(maxNeighbors + obstacleSegmentCapacity);
+            Lines = new OrcaLine[lineCapacity];
+            ProjectionLines = new OrcaLine[lineCapacity];
         }
 
         public int[] QueryEntityIds { get; }
@@ -29,6 +37,10 @@ namespace SwarmECS.Simulation.Systems.Parallel
         public ulong[] QueryDistances { get; }
 
         public AgentNeighbor[] Neighbors { get; }
+
+        public StaticObstacleQueryScratch ObstacleQuery { get; }
+
+        public ObstacleNeighbor[] ObstacleNeighbors { get; }
 
         public OrcaLine[] Lines { get; }
 
@@ -53,7 +65,9 @@ namespace SwarmECS.Simulation.Systems.Parallel
             NeighborAvoidanceSystem owner,
             int backgroundWorkerCount,
             int capacity,
-            int maxNeighbors)
+            int maxNeighbors,
+            StaticObstacleBvh2D obstacleBroadphase,
+            int obstacleSegmentCapacity)
         {
             if (owner == null)
             {
@@ -73,7 +87,13 @@ namespace SwarmECS.Simulation.Systems.Parallel
             {
                 for (int i = 0; i < _workers.Length; ++i)
                 {
-                    Worker worker = new Worker(this, i, capacity, maxNeighbors);
+                    Worker worker = new Worker(
+                        this,
+                        i,
+                        capacity,
+                        maxNeighbors,
+                        obstacleBroadphase,
+                        obstacleSegmentCapacity);
                     _workers[i] = worker;
                     worker.Start();
                     ++started;
@@ -104,7 +124,8 @@ namespace SwarmECS.Simulation.Systems.Parallel
             SwarmWorld world,
             AvoidanceWorkerScratch mainScratch,
             out int neighborLinks,
-            out int orcaLines)
+            out int obstacleOrcaLines,
+            out int agentOrcaLines)
         {
             if (world == null)
             {
@@ -136,7 +157,8 @@ namespace SwarmECS.Simulation.Systems.Parallel
             GetRange(world.Count, 0, laneCount, out int mainStart, out int mainEnd);
             ExceptionDispatchInfo failure = null;
             neighborLinks = 0;
-            orcaLines = 0;
+            obstacleOrcaLines = 0;
+            agentOrcaLines = 0;
 
             try
             {
@@ -146,7 +168,8 @@ namespace SwarmECS.Simulation.Systems.Parallel
                     mainEnd,
                     mainScratch,
                     out neighborLinks,
-                    out orcaLines);
+                    out obstacleOrcaLines,
+                    out agentOrcaLines);
             }
             catch (Exception exception)
             {
@@ -158,7 +181,8 @@ namespace SwarmECS.Simulation.Systems.Parallel
                 Worker worker = _workers[i];
                 worker.WaitForCompletion();
                 neighborLinks += worker.NeighborLinks;
-                orcaLines += worker.OrcaLines;
+                obstacleOrcaLines += worker.ObstacleOrcaLines;
+                agentOrcaLines += worker.AgentOrcaLines;
 
                 if (failure == null && worker.Failure != null)
                 {
@@ -214,12 +238,18 @@ namespace SwarmECS.Simulation.Systems.Parallel
                 AvoidanceWorkerPool pool,
                 int index,
                 int capacity,
-                int maxNeighbors)
+                int maxNeighbors,
+                StaticObstacleBvh2D obstacleBroadphase,
+                int obstacleSegmentCapacity)
             {
                 _pool = pool;
                 _workSignal = new AutoResetEvent(false);
                 _completionSignal = new AutoResetEvent(false);
-                _scratch = new AvoidanceWorkerScratch(capacity, maxNeighbors);
+                _scratch = new AvoidanceWorkerScratch(
+                    capacity,
+                    maxNeighbors,
+                    obstacleBroadphase,
+                    obstacleSegmentCapacity);
                 _thread = new Thread(Run)
                 {
                     IsBackground = true,
@@ -229,7 +259,9 @@ namespace SwarmECS.Simulation.Systems.Parallel
 
             public int NeighborLinks { get; private set; }
 
-            public int OrcaLines { get; private set; }
+            public int ObstacleOrcaLines { get; private set; }
+
+            public int AgentOrcaLines { get; private set; }
 
             public ExceptionDispatchInfo Failure { get; private set; }
 
@@ -243,7 +275,8 @@ namespace SwarmECS.Simulation.Systems.Parallel
                 _start = start;
                 _end = end;
                 NeighborLinks = 0;
-                OrcaLines = 0;
+                ObstacleOrcaLines = 0;
+                AgentOrcaLines = 0;
                 Failure = null;
             }
 
@@ -287,9 +320,11 @@ namespace SwarmECS.Simulation.Systems.Parallel
                             _end,
                             _scratch,
                             out int neighborLinks,
-                            out int orcaLines);
+                            out int obstacleOrcaLines,
+                            out int agentOrcaLines);
                         NeighborLinks = neighborLinks;
-                        OrcaLines = orcaLines;
+                        ObstacleOrcaLines = obstacleOrcaLines;
+                        AgentOrcaLines = agentOrcaLines;
                     }
                     catch (Exception exception)
                     {

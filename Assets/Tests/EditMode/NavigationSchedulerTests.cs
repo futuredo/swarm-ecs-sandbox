@@ -425,7 +425,7 @@ namespace SwarmECS.Tests.EditMode
 
         private static SwarmWorld CreateWorld(int count, uint seed)
         {
-            SwarmWorld world = new(SwarmConfig.PortfolioDefault(count));
+            SwarmWorld world = new(SwarmConfig.DemoDefault(count));
             world.InitializeDeterministicFormation(count, seed);
             return world;
         }

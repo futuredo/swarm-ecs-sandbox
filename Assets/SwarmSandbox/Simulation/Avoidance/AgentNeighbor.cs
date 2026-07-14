@@ -2,6 +2,12 @@ using SwarmECS.FixedPoint;
 
 namespace SwarmECS.Simulation.Avoidance
 {
+    public enum OrcaLineSourceKind : byte
+    {
+        StaticObstacle = 0,
+        Agent = 1,
+    }
+
     /// <summary>
     /// The portion of another agent's state required by the ORCA solver.
     /// RelativePosition is otherPosition - thisAgentPosition.
@@ -35,6 +41,8 @@ namespace SwarmECS.Simulation.Avoidance
         public FPVector2 Point;
         public FPVector2 Direction;
         public int NeighborId;
+        public OrcaLineSourceKind SourceKind;
+        public int SourceId;
 
         internal int SourceOrder;
     }

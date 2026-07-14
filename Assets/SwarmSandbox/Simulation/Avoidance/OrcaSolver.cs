@@ -1,3 +1,11 @@
+// Portions of the static-obstacle ORCA constraint construction and linear-program
+// solver are adapted from RVO2 Agent.cc, then substantially modified for C#,
+// deterministic Q16.16 arithmetic, caller-owned buffers, and stable ordering.
+//
+// SPDX-FileCopyrightText: 2008 University of North Carolina at Chapel Hill
+// SPDX-License-Identifier: Apache-2.0
+// Source: https://github.com/snape/RVO2/blob/main/src/Agent.cc
+
 using System;
 using SwarmECS.FixedPoint;
 
@@ -6,9 +14,9 @@ namespace SwarmECS.Simulation.Avoidance
     /// <summary>
     /// Deterministic, allocation-free two-dimensional RVO2/ORCA velocity solver.
     ///
-    /// The caller owns the neighbor, line, and projection-line buffers. A line buffer
-    /// must have at least neighborCount entries and projectionLines must be a separate
-    /// buffer of the same minimum size. No floating-point operation is used here.
+    /// The caller owns the neighbor, line, and projection-line buffers. For the static
+    /// obstacle overload, both line buffers must hold obstacleNeighborCount +
+    /// neighborCount entries. No floating-point operation is used here.
     /// </summary>
     public static class OrcaSolver
     {
@@ -16,6 +24,7 @@ namespace SwarmECS.Simulation.Avoidance
         // preserving the smallest useful geometric distinctions in the simulation.
         private static readonly FP ParallelEpsilon = FP.FromRaw(2);
         private static readonly FP NormalizationEpsilon = FP.FromRaw(2);
+        private static readonly FP ObstacleCoverageEpsilon = FP.FromRaw(2);
         private static readonly FP ClampSafetyScale = FP.FromRaw(FP.OneRaw - 2);
 
         /// <summary>
@@ -68,7 +77,58 @@ namespace SwarmECS.Simulation.Avoidance
             OrcaLine[] projectionLines,
             out FPVector2 newVelocity)
         {
-            ValidateBuffers(neighbors, neighborCount, lines, projectionLines);
+            return Solve(
+                agentStableId,
+                FPVector2.Zero,
+                currentVelocity,
+                preferredVelocity,
+                radius,
+                maxSpeed,
+                timeHorizon,
+                timeStep,
+                null,
+                0,
+                neighbors,
+                neighborCount,
+                lines,
+                projectionLines,
+                out _,
+                out newVelocity);
+        }
+
+        /// <summary>
+        /// Solves one agent against immutable static obstacle segments followed by Agent
+        /// constraints. The active obstacle-neighbor prefix is distance-sorted in place.
+        /// The returned count includes both kinds of lines; obstacleLineCount identifies
+        /// the immutable prefix consumed by LP3.
+        /// </summary>
+        public static int Solve(
+            int agentStableId,
+            FPVector2 agentPosition,
+            FPVector2 currentVelocity,
+            FPVector2 preferredVelocity,
+            FP radius,
+            FP maxSpeed,
+            FP timeHorizon,
+            FP timeStep,
+            ObstacleNeighbor[] obstacleNeighbors,
+            int obstacleNeighborCount,
+            AgentNeighbor[] neighbors,
+            int neighborCount,
+            OrcaLine[] lines,
+            OrcaLine[] projectionLines,
+            out int obstacleLineCount,
+            out FPVector2 newVelocity)
+        {
+            ValidateBuffers(
+                obstacleNeighbors,
+                obstacleNeighborCount,
+                neighbors,
+                neighborCount,
+                lines,
+                projectionLines);
+
+            obstacleLineCount = 0;
 
             if (maxSpeed <= FP.Zero)
             {
@@ -91,6 +151,51 @@ namespace SwarmECS.Simulation.Avoidance
             FP inverseTimeStep = FP.One / timeStep;
             int lineCount = 0;
 
+            PrepareObstacleNeighborOrder(agentPosition, obstacleNeighbors, obstacleNeighborCount);
+            for (int i = 0; i < obstacleNeighborCount; i++)
+            {
+                ObstacleSegment segment = obstacleNeighbors[i].Segment;
+                // CCW obstacle interiors lie on the left. RVO2 obstacle constraints
+                // are one-sided and only the right/free side can be visible. Keep the
+                // check here as part of the public solver contract even when the
+                // broadphase collector has already removed back faces.
+                if (FPMath.Det(
+                    segment.Direction,
+                    agentPosition - segment.Start) >= FP.Zero)
+                {
+                    continue;
+                }
+
+                FPVector2 relativeStart = segment.Start - agentPosition;
+                FPVector2 relativeEnd = segment.End - agentPosition;
+
+                if (IsObstacleAlreadyCovered(
+                    relativeStart,
+                    relativeEnd,
+                    agentRadius,
+                    inverseTimeHorizon,
+                    lines,
+                    lineCount))
+                {
+                    continue;
+                }
+
+                if (TryBuildObstacleLine(
+                    currentVelocity,
+                    agentRadius,
+                    inverseTimeHorizon,
+                    in segment,
+                    relativeStart,
+                    relativeEnd,
+                    i,
+                    out OrcaLine obstacleLine))
+                {
+                    lines[lineCount++] = obstacleLine;
+                }
+            }
+
+            obstacleLineCount = lineCount;
+
             for (int i = 0; i < neighborCount; i++)
             {
                 AgentNeighbor neighbor = neighbors[i];
@@ -103,7 +208,7 @@ namespace SwarmECS.Simulation.Avoidance
                     neighbor,
                     i);
 
-                InsertLineSorted(lines, ref lineCount, line);
+                InsertLineSorted(lines, obstacleLineCount, ref lineCount, line);
             }
 
             int failedLine = LinearProgram2(
@@ -119,7 +224,7 @@ namespace SwarmECS.Simulation.Avoidance
                 LinearProgram3(
                     lines,
                     lineCount,
-                    0,
+                    obstacleLineCount,
                     failedLine,
                     maxSpeed,
                     projectionLines,
@@ -128,6 +233,297 @@ namespace SwarmECS.Simulation.Avoidance
 
             newVelocity = ClampMagnitude(newVelocity, maxSpeed);
             return lineCount;
+        }
+
+        private static void PrepareObstacleNeighborOrder(
+            FPVector2 agentPosition,
+            ObstacleNeighbor[] obstacleNeighbors,
+            int obstacleNeighborCount)
+        {
+            for (int i = 0; i < obstacleNeighborCount; i++)
+            {
+                ObstacleSegment segment = obstacleNeighbors[i].Segment;
+                ulong distanceSquared = StaticObstacleSegmentBuilder.DistanceSquaredRaw(
+                    agentPosition,
+                    in segment);
+                obstacleNeighbors[i] = new ObstacleNeighbor(segment, distanceSquared);
+            }
+
+            for (int i = 1; i < obstacleNeighborCount; i++)
+            {
+                ObstacleNeighbor candidate = obstacleNeighbors[i];
+                int insert = i;
+                while (insert > 0 && CompareObstacleNeighbor(candidate, obstacleNeighbors[insert - 1]) < 0)
+                {
+                    obstacleNeighbors[insert] = obstacleNeighbors[insert - 1];
+                    insert--;
+                }
+
+                obstacleNeighbors[insert] = candidate;
+            }
+        }
+
+        private static int CompareObstacleNeighbor(ObstacleNeighbor left, ObstacleNeighbor right)
+        {
+            if (left.DistanceSquared < right.DistanceSquared)
+            {
+                return -1;
+            }
+
+            if (left.DistanceSquared > right.DistanceSquared)
+            {
+                return 1;
+            }
+
+            if (left.Segment.ObstacleId != right.Segment.ObstacleId)
+            {
+                return left.Segment.ObstacleId < right.Segment.ObstacleId ? -1 : 1;
+            }
+
+            if (left.Segment.EdgeIndex != right.Segment.EdgeIndex)
+            {
+                return left.Segment.EdgeIndex < right.Segment.EdgeIndex ? -1 : 1;
+            }
+
+            return 0;
+        }
+
+        private static bool IsObstacleAlreadyCovered(
+            FPVector2 relativeStart,
+            FPVector2 relativeEnd,
+            FP radius,
+            FP inverseTimeHorizon,
+            OrcaLine[] lines,
+            int obstacleLineCount)
+        {
+            FP scaledRadius = radius * inverseTimeHorizon;
+            FP threshold = -ObstacleCoverageEpsilon;
+
+            for (int i = 0; i < obstacleLineCount; i++)
+            {
+                OrcaLine previous = lines[i];
+                FP startClearance = FPMath.Det(
+                    (relativeStart * inverseTimeHorizon) - previous.Point,
+                    previous.Direction) - scaledRadius;
+                FP endClearance = FPMath.Det(
+                    (relativeEnd * inverseTimeHorizon) - previous.Point,
+                    previous.Direction) - scaledRadius;
+
+                if (startClearance >= threshold && endClearance >= threshold)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryBuildObstacleLine(
+            FPVector2 currentVelocity,
+            FP radius,
+            FP inverseTimeHorizon,
+            in ObstacleSegment segment,
+            FPVector2 relativeStart,
+            FPVector2 relativeEnd,
+            int sourceOrder,
+            out OrcaLine line)
+        {
+            line = new OrcaLine
+            {
+                NeighborId = -1,
+                SourceKind = OrcaLineSourceKind.StaticObstacle,
+                SourceId = segment.StableId,
+                SourceOrder = sourceOrder,
+            };
+
+            FP radiusSquared = radius * radius;
+            FP distanceSquaredStart = relativeStart.SqrMagnitude;
+            FP distanceSquaredEnd = relativeEnd.SqrMagnitude;
+            FPVector2 obstacleVector = relativeEnd - relativeStart;
+            FP obstacleLengthSquared = obstacleVector.SqrMagnitude;
+            if (obstacleLengthSquared <= (NormalizationEpsilon * NormalizationEpsilon))
+            {
+                return false;
+            }
+
+            FP segmentProjection = FPMath.Dot(-relativeStart, obstacleVector) / obstacleLengthSquared;
+            FPVector2 lineOffset = -relativeStart - (obstacleVector * segmentProjection);
+            FP distanceSquaredLine = lineOffset.SqrMagnitude;
+
+            if (segmentProjection < FP.Zero && distanceSquaredStart <= radiusSquared)
+            {
+                line.Point = FPVector2.Zero;
+                line.Direction = NormalizeOrFallback(
+                    FPMath.PerpendicularLeft(relativeStart),
+                    -segment.Direction);
+                return true;
+            }
+
+            if (segmentProjection > FP.One && distanceSquaredEnd <= radiusSquared)
+            {
+                if (FPMath.Det(relativeEnd, segment.NextDirection) < FP.Zero)
+                {
+                    return false;
+                }
+
+                line.Point = FPVector2.Zero;
+                line.Direction = NormalizeOrFallback(
+                    FPMath.PerpendicularLeft(relativeEnd),
+                    -segment.NextDirection);
+                return true;
+            }
+
+            if (segmentProjection >= FP.Zero &&
+                segmentProjection <= FP.One &&
+                distanceSquaredLine <= radiusSquared)
+            {
+                line.Point = FPVector2.Zero;
+                line.Direction = -segment.Direction;
+                return true;
+            }
+
+            FPVector2 activeStart = relativeStart;
+            FPVector2 activeEnd = relativeEnd;
+            FPVector2 activeEdgeDirection = segment.Direction;
+            FPVector2 activePreviousDirection = segment.PreviousDirection;
+            FPVector2 activeNextDirection = segment.NextDirection;
+            FPVector2 leftLegDirection;
+            FPVector2 rightLegDirection;
+            bool singleVertex = false;
+
+            if (segmentProjection < FP.Zero && distanceSquaredLine <= radiusSquared)
+            {
+                FP leg = FPMath.Sqrt(FPMath.Max(distanceSquaredStart - radiusSquared, FP.Zero));
+                leftLegDirection = new FPVector2(
+                    (relativeStart.X * leg) - (relativeStart.Y * radius),
+                    (relativeStart.X * radius) + (relativeStart.Y * leg)) / distanceSquaredStart;
+                rightLegDirection = new FPVector2(
+                    (relativeStart.X * leg) + (relativeStart.Y * radius),
+                    (-relativeStart.X * radius) + (relativeStart.Y * leg)) / distanceSquaredStart;
+                activeEnd = activeStart;
+                activeNextDirection = segment.Direction;
+                singleVertex = true;
+            }
+            else if (segmentProjection > FP.One && distanceSquaredLine <= radiusSquared)
+            {
+                FP leg = FPMath.Sqrt(FPMath.Max(distanceSquaredEnd - radiusSquared, FP.Zero));
+                leftLegDirection = new FPVector2(
+                    (relativeEnd.X * leg) - (relativeEnd.Y * radius),
+                    (relativeEnd.X * radius) + (relativeEnd.Y * leg)) / distanceSquaredEnd;
+                rightLegDirection = new FPVector2(
+                    (relativeEnd.X * leg) + (relativeEnd.Y * radius),
+                    (-relativeEnd.X * radius) + (relativeEnd.Y * leg)) / distanceSquaredEnd;
+                activeStart = activeEnd;
+                activeEdgeDirection = segment.NextDirection;
+                activePreviousDirection = segment.Direction;
+                singleVertex = true;
+            }
+            else
+            {
+                FP leftLeg = FPMath.Sqrt(FPMath.Max(distanceSquaredStart - radiusSquared, FP.Zero));
+                leftLegDirection = new FPVector2(
+                    (relativeStart.X * leftLeg) - (relativeStart.Y * radius),
+                    (relativeStart.X * radius) + (relativeStart.Y * leftLeg)) / distanceSquaredStart;
+
+                FP rightLeg = FPMath.Sqrt(FPMath.Max(distanceSquaredEnd - radiusSquared, FP.Zero));
+                rightLegDirection = new FPVector2(
+                    (relativeEnd.X * rightLeg) + (relativeEnd.Y * radius),
+                    (-relativeEnd.X * radius) + (relativeEnd.Y * rightLeg)) / distanceSquaredEnd;
+            }
+
+            leftLegDirection = NormalizeOrFallback(leftLegDirection, -activePreviousDirection);
+            rightLegDirection = NormalizeOrFallback(rightLegDirection, activeNextDirection);
+
+            bool leftLegIsForeign = false;
+            bool rightLegIsForeign = false;
+            if (FPMath.Det(leftLegDirection, -activePreviousDirection) >= FP.Zero)
+            {
+                leftLegDirection = -activePreviousDirection;
+                leftLegIsForeign = true;
+            }
+
+            if (FPMath.Det(rightLegDirection, activeNextDirection) <= FP.Zero)
+            {
+                rightLegDirection = activeNextDirection;
+                rightLegIsForeign = true;
+            }
+
+            FPVector2 leftCutoff = activeStart * inverseTimeHorizon;
+            FPVector2 rightCutoff = activeEnd * inverseTimeHorizon;
+            FPVector2 cutoffVector = rightCutoff - leftCutoff;
+            FP cutoffLengthSquared = cutoffVector.SqrMagnitude;
+            bool cutoffIsDegenerate = singleVertex ||
+                cutoffLengthSquared <= (NormalizationEpsilon * NormalizationEpsilon);
+            FP cutoffProjection = cutoffIsDegenerate
+                ? FP.Half
+                : FPMath.Dot(currentVelocity - leftCutoff, cutoffVector) / cutoffLengthSquared;
+            FP leftProjection = FPMath.Dot(currentVelocity - leftCutoff, leftLegDirection);
+            FP rightProjection = FPMath.Dot(currentVelocity - rightCutoff, rightLegDirection);
+
+            if ((cutoffProjection < FP.Zero && leftProjection < FP.Zero) ||
+                (singleVertex && leftProjection < FP.Zero && rightProjection < FP.Zero))
+            {
+                FPVector2 fallback = NormalizeOrFallback(
+                    -activeStart,
+                    FPMath.PerpendicularRight(activeEdgeDirection));
+                FPVector2 unitW = NormalizeOrFallback(currentVelocity - leftCutoff, fallback);
+                line.Direction = FPMath.PerpendicularRight(unitW);
+                line.Point = leftCutoff + (unitW * (radius * inverseTimeHorizon));
+                return true;
+            }
+
+            if (cutoffProjection > FP.One && rightProjection < FP.Zero)
+            {
+                FPVector2 fallback = NormalizeOrFallback(
+                    -activeEnd,
+                    FPMath.PerpendicularRight(activeEdgeDirection));
+                FPVector2 unitW = NormalizeOrFallback(currentVelocity - rightCutoff, fallback);
+                line.Direction = FPMath.PerpendicularRight(unitW);
+                line.Point = rightCutoff + (unitW * (radius * inverseTimeHorizon));
+                return true;
+            }
+
+            FP distanceSquaredCutoff = cutoffIsDegenerate ||
+                cutoffProjection < FP.Zero ||
+                cutoffProjection > FP.One
+                ? FP.MaxValue
+                : (currentVelocity - (leftCutoff + (cutoffVector * cutoffProjection))).SqrMagnitude;
+            FP distanceSquaredLeft = leftProjection < FP.Zero
+                ? FP.MaxValue
+                : (currentVelocity - (leftCutoff + (leftLegDirection * leftProjection))).SqrMagnitude;
+            FP distanceSquaredRight = rightProjection < FP.Zero
+                ? FP.MaxValue
+                : (currentVelocity - (rightCutoff + (rightLegDirection * rightProjection))).SqrMagnitude;
+
+            FP scaledRadius = radius * inverseTimeHorizon;
+            if (distanceSquaredCutoff <= distanceSquaredLeft &&
+                distanceSquaredCutoff <= distanceSquaredRight)
+            {
+                line.Direction = -activeEdgeDirection;
+                line.Point = leftCutoff + (FPMath.PerpendicularLeft(line.Direction) * scaledRadius);
+                return true;
+            }
+
+            if (distanceSquaredLeft <= distanceSquaredRight)
+            {
+                if (leftLegIsForeign)
+                {
+                    return false;
+                }
+
+                line.Direction = leftLegDirection;
+                line.Point = leftCutoff + (FPMath.PerpendicularLeft(line.Direction) * scaledRadius);
+                return true;
+            }
+
+            if (rightLegIsForeign)
+            {
+                return false;
+            }
+
+            line.Direction = -rightLegDirection;
+            line.Point = rightCutoff + (FPMath.PerpendicularLeft(line.Direction) * scaledRadius);
+            return true;
         }
 
         private static OrcaLine BuildAgentLine(
@@ -215,6 +611,8 @@ namespace SwarmECS.Simulation.Avoidance
                 Point = currentVelocity + (correction * FP.Half),
                 Direction = direction,
                 NeighborId = neighbor.StableId,
+                SourceKind = OrcaLineSourceKind.Agent,
+                SourceId = neighbor.StableId,
                 SourceOrder = sourceOrder
             };
         }
@@ -401,6 +799,8 @@ namespace SwarmECS.Simulation.Avoidance
                         other.Direction - current.Direction,
                         FPMath.PerpendicularLeft(current.Direction));
                     projected.NeighborId = other.NeighborId;
+                    projected.SourceKind = other.SourceKind;
+                    projected.SourceId = other.SourceId;
                     projected.SourceOrder = other.SourceOrder;
                     projectionLines[projectionCount++] = projected;
                 }
@@ -426,11 +826,15 @@ namespace SwarmECS.Simulation.Avoidance
             }
         }
 
-        private static void InsertLineSorted(OrcaLine[] lines, ref int lineCount, OrcaLine line)
+        private static void InsertLineSorted(
+            OrcaLine[] lines,
+            int sortStart,
+            ref int lineCount,
+            OrcaLine line)
         {
             int insert = lineCount;
 
-            while (insert > 0 && CompareLineOrder(line, lines[insert - 1]) < 0)
+            while (insert > sortStart && CompareLineOrder(line, lines[insert - 1]) < 0)
             {
                 lines[insert] = lines[insert - 1];
                 insert--;
@@ -498,15 +902,7 @@ namespace SwarmECS.Simulation.Avoidance
 
         private static FPVector2 NormalizeOrFallback(FPVector2 value, FPVector2 fallback)
         {
-            FP squaredLength = value.SqrMagnitude;
-
-            if (squaredLength <= (NormalizationEpsilon * NormalizationEpsilon))
-            {
-                return fallback;
-            }
-
-            FP length = FPMath.Sqrt(squaredLength);
-            return length <= NormalizationEpsilon ? fallback : value / length;
+            return FPMath.NormalizeSafe(value, fallback, NormalizationEpsilon);
         }
 
         private static FPVector2 ClampMagnitude(FPVector2 value, FP maxMagnitude)
@@ -539,11 +935,30 @@ namespace SwarmECS.Simulation.Avoidance
         }
 
         private static void ValidateBuffers(
+            ObstacleNeighbor[] obstacleNeighbors,
+            int obstacleNeighborCount,
             AgentNeighbor[] neighbors,
             int neighborCount,
             OrcaLine[] lines,
             OrcaLine[] projectionLines)
         {
+            if (obstacleNeighborCount < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(obstacleNeighborCount));
+            }
+
+            if (obstacleNeighbors == null)
+            {
+                if (obstacleNeighborCount != 0)
+                {
+                    throw new ArgumentNullException(nameof(obstacleNeighbors));
+                }
+            }
+            else if (obstacleNeighborCount > obstacleNeighbors.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(obstacleNeighborCount));
+            }
+
             if (neighborCount < 0)
             {
                 throw new ArgumentOutOfRangeException(nameof(neighborCount));
@@ -571,17 +986,22 @@ namespace SwarmECS.Simulation.Avoidance
                 throw new ArgumentNullException(nameof(projectionLines));
             }
 
-            if (lines.Length < neighborCount)
+            long requiredLineCount = (long)obstacleNeighborCount + neighborCount;
+            if (lines.Length < requiredLineCount)
             {
-                throw new ArgumentException("Line buffer is smaller than neighborCount.", nameof(lines));
+                throw new ArgumentException(
+                    "Line buffer is smaller than obstacleNeighborCount + neighborCount.",
+                    nameof(lines));
             }
 
-            if (projectionLines.Length < neighborCount)
+            if (projectionLines.Length < requiredLineCount)
             {
-                throw new ArgumentException("Projection-line buffer is smaller than neighborCount.", nameof(projectionLines));
+                throw new ArgumentException(
+                    "Projection-line buffer is smaller than obstacleNeighborCount + neighborCount.",
+                    nameof(projectionLines));
             }
 
-            if (neighborCount > 0 && ReferenceEquals(lines, projectionLines))
+            if (requiredLineCount > 0 && ReferenceEquals(lines, projectionLines))
             {
                 throw new ArgumentException("ORCA line and projection-line buffers must be different arrays.");
             }

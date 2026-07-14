@@ -6,7 +6,7 @@ using UnityEngine;
 namespace SwarmECS.Runtime
 {
     /// <summary>
-    /// Player-only portfolio capture hook. It is dormant unless -swarmCapturePath is supplied.
+    /// Player-only automated capture hook. It is dormant unless -swarmCapturePath is supplied.
     /// </summary>
     public sealed class SwarmAutomatedCapture : MonoBehaviour
     {

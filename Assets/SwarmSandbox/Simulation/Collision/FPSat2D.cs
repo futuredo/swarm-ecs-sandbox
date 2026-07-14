@@ -1,4 +1,5 @@
 using SwarmECS.FixedPoint;
+using SwarmECS.Simulation.Spatial;
 
 namespace SwarmECS.Simulation.Collision
 {
@@ -67,19 +68,21 @@ namespace SwarmECS.Simulation.Collision
             FP clampedX = FPMath.Min(FPMath.Max(localX, FP.Zero - box.HalfExtents.X), box.HalfExtents.X);
             FP clampedY = FPMath.Min(FPMath.Max(localY, FP.Zero - box.HalfExtents.Y), box.HalfExtents.Y);
             FPVector2 closest = box.Center + box.AxisX * clampedX + box.AxisY * clampedY;
-            FPVector2 separation = circle.Center - closest;
-            FP distanceSquared = separation.SqrMagnitude;
-            FP radiusSquared = circle.Radius * circle.Radius;
-            if (distanceSquared > radiusSquared)
+            ulong distanceSquaredRaw = SpatialQueryDistance.Squared(circle.Center, closest);
+            ulong radiusRaw = (uint)circle.Radius.Raw;
+            ulong radiusSquaredRaw = radiusRaw * radiusRaw;
+            if (distanceSquaredRaw > radiusSquaredRaw)
             {
                 normal = FPVector2.Zero;
                 depth = FP.Zero;
                 return false;
             }
 
-            FP distance = FPMath.Sqrt(distanceSquared);
-            if (distance > FP.Zero)
+            ulong distanceRaw = IntegerSquareRoot(distanceSquaredRaw);
+            if (distanceRaw > 0UL)
             {
+                FPVector2 separation = circle.Center - closest;
+                FP distance = FP.FromRaw((int)distanceRaw);
                 normal = separation / distance;
                 depth = circle.Radius - distance;
             }
@@ -91,6 +94,35 @@ namespace SwarmECS.Simulation.Collision
             }
 
             return true;
+        }
+
+        private static ulong IntegerSquareRoot(ulong value)
+        {
+            ulong remainder = value;
+            ulong result = 0UL;
+            ulong bit = 1UL << 62;
+
+            while (bit > remainder)
+            {
+                bit >>= 2;
+            }
+
+            while (bit != 0UL)
+            {
+                if (remainder >= result + bit)
+                {
+                    remainder -= result + bit;
+                    result = (result >> 1) + bit;
+                }
+                else
+                {
+                    result >>= 1;
+                }
+
+                bit >>= 2;
+            }
+
+            return result;
         }
 
         private static bool TestAxis(

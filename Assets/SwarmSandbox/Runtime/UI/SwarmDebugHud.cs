@@ -30,7 +30,7 @@ namespace SwarmECS.Runtime
             }
 
             const float panelWidth = 410f;
-            float panelHeight = Mathf.Min(Screen.height - 28f, 530f);
+            float panelHeight = Mathf.Min(Screen.height - 28f, 590f);
             Rect panel = new(14f, 14f, panelWidth, panelHeight);
             GUI.color = new Color(0.025f, 0.045f, 0.07f, 0.94f);
             GUI.Box(panel, GUIContent.none);
@@ -86,9 +86,19 @@ namespace SwarmECS.Runtime
             _builder.Append("SPATIAL + AVOIDANCE\n");
             _builder.Append("Neighbor     ").Append(GetNeighborModeLabel(_host.World.SpatialIndexMode)).Append('\n');
             _builder.Append("Neighbors    ").Append(_host.Simulation.Avoidance.LastNeighborLinks.ToString("N0"));
-            _builder.Append("    ORCA lines ").Append(_host.Simulation.Avoidance.LastOrcaLines.ToString("N0")).Append('\n');
-            _builder.Append("SAT contacts ").Append(_host.Simulation.Obstacles.LastContactCount.ToString("N0"));
-            _builder.Append("    A* shared waypoints ").Append(_host.Simulation.Navigation.TotalSharedWaypoints).Append('\n');
+            _builder.Append("    ORCA O/A ");
+            _builder.Append(_host.Simulation.Avoidance.LastObstacleOrcaLines.ToString("N0")).Append('/');
+            _builder.Append(_host.Simulation.Avoidance.LastAgentOrcaLines.ToString("N0")).Append('\n');
+            _builder.Append("Avoid BVH q ").Append(_host.Simulation.Avoidance.LastObstacleBroadphaseQueries.ToString("N0"));
+            _builder.Append("    collision q/cand ");
+            _builder.Append(_host.Simulation.Obstacles.LastBroadphaseQueries.ToString("N0")).Append('/');
+            _builder.Append(_host.Simulation.Obstacles.LastBroadphaseCandidates.ToString("N0")).Append('\n');
+            _builder.Append("CCD hits     ").Append(_host.Simulation.Obstacles.LastSweepHits.ToString("N0"));
+            _builder.Append("    SAT fallback ").Append(_host.Simulation.Obstacles.LastPenetrationRecoveries.ToString("N0")).Append('\n');
+            _builder.Append("Residual raw ").Append(_host.Simulation.Obstacles.LastMaxResidualDepth.Raw).Append('\n');
+            _builder.Append("Steering A/T ").Append(_host.Simulation.Movement.LastAccelerationLimitedAgents.ToString("N0"));
+            _builder.Append('/').Append(_host.Simulation.Movement.LastTurnLimitedAgents.ToString("N0"));
+            _builder.Append("    A* waypoints ").Append(_host.Simulation.Navigation.TotalSharedWaypoints).Append('\n');
             _builder.Append("Path req     ").Append(_host.Simulation.Navigation.LastProcessedPathRequests);
             _builder.Append('/').Append(_host.Simulation.Navigation.MaxPathRequestsPerTick);
             _builder.Append("    pending ").Append(_host.Simulation.Navigation.PendingPathRequests).Append('\n');
@@ -100,6 +110,7 @@ namespace SwarmECS.Runtime
 
             _builder.Append("DETERMINISTIC NETCODE LAB\n");
             _builder.Append("Twin-world   ").Append(_host.DeterminismProbePassed ? "PASS (raw state identical)" : "FAIL").Append('\n');
+            _builder.Append("Config hash  0x").Append(_host.World.Config.ConfigHash.ToString("X16")).Append('\n');
             _builder.Append("State hash   0x").Append(_host.CurrentHash.ToString("X16")).Append('\n');
             _builder.Append("Rollback     ").Append(_host.Rollback.RollbackCount);
             _builder.Append("    last replay ").Append(_host.Rollback.LastResimulatedTicks).Append(" ticks\n");
@@ -107,8 +118,8 @@ namespace SwarmECS.Runtime
             _builder.Append("    catch-up backlog ").Append(_host.CatchUpBacklog).Append("\n\n");
 
             _builder.Append("PIPELINE\n");
-            _builder.Append("Budgeted shared A* → Grid/KD query → RVO2 ORCA LP\n");
-            _builder.Append("→ fixed-point integrate → SAT resolve → GPU upload");
+            _builder.Append("A* → Grid/KD + obstacle BVH → obstacle/agent ORCA\n");
+            _builder.Append("→ bounded steering → swept CCD/slide → SAT fallback → GPU");
             _cachedMetrics = _builder.ToString();
         }
 

@@ -87,7 +87,7 @@ public sealed class SwarmWorld
         GroupTargets[3] = new FPVector2(FP.FromInt(46), FP.FromInt(-46));
 
         int agentsPerGroup = (Count + GroupCount - 1) / GroupCount;
-        int side = (int)Math.Ceiling(Math.Sqrt(agentsPerGroup));
+        int side = FPMath.CeilingIntegerSquareRoot(agentsPerGroup);
         FP spacing = FP.FromRatio(11, 10);
         FP halfSide = FP.FromRatio(side - 1, 2);
 

@@ -100,6 +100,27 @@ namespace SwarmECS.Tests.EditMode
             Assert.Throws<ArgumentOutOfRangeException>(() => FPMath.Sqrt(-FP.One));
         }
 
+        [TestCase(0, 0)]
+        [TestCase(1, 1)]
+        [TestCase(2, 2)]
+        [TestCase(3, 2)]
+        [TestCase(4, 2)]
+        [TestCase(5, 3)]
+        [TestCase(15, 4)]
+        [TestCase(16, 4)]
+        [TestCase(17, 5)]
+        [TestCase(int.MaxValue, 46341)]
+        public void CeilingIntegerSquareRoot_CoversPerfectAdjacentAndMaximumValues(int value, int expected)
+        {
+            Assert.That(FPMath.CeilingIntegerSquareRoot(value), Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void CeilingIntegerSquareRoot_RejectsNegativeValues()
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => FPMath.CeilingIntegerSquareRoot(-1));
+        }
+
         [Test]
         public void Vector2_DotDetAndNormalize_AreDeterministic()
         {
@@ -124,6 +145,20 @@ namespace SwarmECS.Tests.EditMode
             Assert.That(
                 FPMath.NormalizeSafe(new FPVector2(FP.Epsilon, FP.Zero), fallback, FP.FromRaw(2)),
                 Is.EqualTo(fallback));
+        }
+
+        [Test]
+        public void NormalizeSafe_LargeAndUnevenVectorsStayInsideUnitCircle()
+        {
+            FPVector2 uneven = FPMath.NormalizeSafe(
+                new FPVector2(FP.FromInt(1), FP.FromInt(4)));
+            FPVector2 extreme = FPMath.NormalizeSafe(
+                new FPVector2(FP.MaxValue, FP.MaxValue));
+
+            Assert.That(uneven.SqrMagnitude, Is.LessThanOrEqualTo(FP.One));
+            Assert.That(extreme.SqrMagnitude, Is.LessThanOrEqualTo(FP.One));
+            Assert.That(extreme.X, Is.GreaterThan(FP.Zero));
+            Assert.That(extreme.Y, Is.EqualTo(extreme.X));
         }
 
         [Test]

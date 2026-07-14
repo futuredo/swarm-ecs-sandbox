@@ -204,7 +204,7 @@ namespace SwarmECS.Runtime
         {
             _renderer?.Dispose();
             _simulation?.Dispose();
-            SwarmConfig config = SwarmConfig.PortfolioDefault(count);
+            SwarmConfig config = SwarmConfig.DemoDefault(count);
             _world = new SwarmWorld(config);
             _world.InitializeDeterministicFormation(count, deterministicSeed);
             _requestedSpatialIndexMode = config.SpatialIndexMode;
@@ -241,7 +241,7 @@ namespace SwarmECS.Runtime
         private bool RunDeterminismProbe()
         {
             const int probeCount = 256;
-            SwarmConfig config = SwarmConfig.PortfolioDefault(probeCount);
+            SwarmConfig config = SwarmConfig.DemoDefault(probeCount);
             SwarmWorld first = new(config);
             SwarmWorld second = new(config);
             first.InitializeDeterministicFormation(probeCount, deterministicSeed);

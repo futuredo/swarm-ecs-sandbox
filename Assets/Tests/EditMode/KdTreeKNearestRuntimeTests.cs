@@ -69,6 +69,8 @@ namespace SwarmECS.Tests.EditMode
                 FP.FromRatio(1, 30),
                 FP.FromRatio(7, 20),
                 FP.FromInt(6),
+                SwarmConfig.DefaultMaxAcceleration,
+                SwarmConfig.DefaultMaxTurnStep,
                 FP.FromInt(4),
                 maxNeighbors,
                 FP.FromInt(2),

@@ -364,6 +364,40 @@ namespace SwarmECS.Tests.EditMode
         }
 
         [Test]
+        public void CommandTimeline_OrderedAppendUsesSequentialCursorAndRewindsDeterministically()
+        {
+            SwarmWorld world = CreateWorld(8, 18u);
+            CommandTimeline timeline = new(4);
+            SimulationCommand first = new(
+                1,
+                10,
+                SimulationCommandType.SetGroupTarget,
+                0,
+                new FPVector2(FP.FromInt(11), FP.FromInt(12)));
+            SimulationCommand second = new(
+                3,
+                11,
+                SimulationCommandType.SetGroupTarget,
+                0,
+                new FPVector2(FP.FromInt(31), FP.FromInt(32)));
+
+            Assert.That(timeline.AppendOrdered(first), Is.True);
+            Assert.That(timeline.AppendOrdered(second), Is.True);
+            Assert.That(timeline.AppendOrdered(first), Is.False);
+            Assert.That(timeline.Count, Is.EqualTo(2));
+
+            timeline.ApplyAtTick(world, 0);
+            timeline.ApplyAtTick(world, 1);
+            Assert.That(world.GroupTargets[0], Is.EqualTo(first.Value));
+            timeline.ApplyAtTick(world, 2);
+            timeline.ApplyAtTick(world, 3);
+            Assert.That(world.GroupTargets[0], Is.EqualTo(second.Value));
+
+            timeline.ApplyAtTick(world, 1);
+            Assert.That(world.GroupTargets[0], Is.EqualTo(first.Value));
+        }
+
+        [Test]
         public void SharedAStarRoutes_AreGeneratedForAllFourSquads()
         {
             SwarmWorld world = CreateWorld(32, 7u);
@@ -406,17 +440,8 @@ namespace SwarmECS.Tests.EditMode
 
         private static SwarmWorld CreateWorld(int count, uint seed, SpatialIndexMode mode)
         {
-            SwarmConfig baseline = SwarmConfig.PortfolioDefault(count);
-            SwarmConfig config = new(
-                baseline.Capacity,
-                baseline.FixedDeltaTime,
-                baseline.AgentRadius,
-                baseline.MaxSpeed,
-                baseline.NeighborDistance,
-                baseline.MaxNeighbors,
-                baseline.TimeHorizon,
-                baseline.WorldHalfExtent,
-                mode);
+            SwarmConfig baseline = SwarmConfig.DemoDefault(count);
+            SwarmConfig config = baseline.WithSpatialIndexMode(mode);
             SwarmWorld world = new(config);
             world.InitializeDeterministicFormation(count, seed);
             return world;

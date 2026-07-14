@@ -38,6 +38,8 @@ public sealed class CommandTimeline
 {
     private readonly SimulationCommand[] _commands;
     private int _count;
+    private int _nextApplyIndex;
+    private int _lastAppliedTick = -1;
 
     public CommandTimeline(int capacity)
     {
@@ -54,6 +56,7 @@ public sealed class CommandTimeline
             if (current.Tick == command.Tick && current.Sequence == command.Sequence)
             {
                 _commands[i] = command;
+                ResetPlaybackCursor();
                 return true;
             }
         }
@@ -72,6 +75,25 @@ public sealed class CommandTimeline
 
         _commands[insertionIndex] = command;
         _count++;
+        ResetPlaybackCursor();
+        return true;
+    }
+
+    /// <summary>
+    /// Appends one command from an already validated canonical stream in O(1). This
+    /// avoids the duplicate scan and insertion sort required for live out-of-order
+    /// arrivals. The new command must be strictly later by (tick, sequence).
+    /// </summary>
+    public bool AppendOrdered(SimulationCommand command)
+    {
+        if (_count >= _commands.Length ||
+            (_count > 0 && !ComesBefore(_commands[_count - 1], command)))
+        {
+            return false;
+        }
+
+        _commands[_count++] = command;
+        ResetPlaybackCursor();
         return true;
     }
 
@@ -101,24 +123,27 @@ public sealed class CommandTimeline
         }
 
         _count = retainedCount;
+        ResetPlaybackCursor();
         return firstRetained;
     }
 
     public void ApplyAtTick(SwarmWorld world, int tick)
     {
-        for (int i = 0; i < _count; i++)
+        // Sequential playback visits each retained command once. Rollback or an
+        // explicit repeated tick rewinds the cursor and preserves the old semantics.
+        if (tick <= _lastAppliedTick)
         {
-            SimulationCommand command = _commands[i];
-            if (command.Tick > tick)
-            {
-                break;
-            }
+            _nextApplyIndex = 0;
+        }
 
-            if (command.Tick != tick)
-            {
-                continue;
-            }
+        while (_nextApplyIndex < _count && _commands[_nextApplyIndex].Tick < tick)
+        {
+            _nextApplyIndex++;
+        }
 
+        while (_nextApplyIndex < _count && _commands[_nextApplyIndex].Tick == tick)
+        {
+            SimulationCommand command = _commands[_nextApplyIndex++];
             if (command.Type == SimulationCommandType.SetGroupTarget)
             {
                 world.SetGroupTarget(command.Group, command.Value);
@@ -128,11 +153,20 @@ public sealed class CommandTimeline
                 world.SetSpatialIndexMode((SpatialIndexMode)command.Group);
             }
         }
+
+        _lastAppliedTick = tick;
     }
 
     public void Clear()
     {
         _count = 0;
+        ResetPlaybackCursor();
+    }
+
+    private void ResetPlaybackCursor()
+    {
+        _nextApplyIndex = 0;
+        _lastAppliedTick = -1;
     }
 
     private static bool ComesBefore(SimulationCommand left, SimulationCommand right)

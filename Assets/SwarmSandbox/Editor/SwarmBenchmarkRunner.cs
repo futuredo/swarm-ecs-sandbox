@@ -44,6 +44,17 @@ namespace SwarmECS.Editor
             public int pathCacheCapacity;
             public int navigationIslandCount;
             public int sharedWaypointCount;
+            public long sampleObstacleOrcaLines;
+            public long sampleAgentOrcaLines;
+            public long sampleAvoidanceObstacleBvhQueries;
+            public long sampleCollisionBvhQueries;
+            public long sampleCollisionBvhCandidates;
+            public long sampleCcdSweepHits;
+            public long sampleSatFallbackRecoveries;
+            public int maxResidualPenetrationRaw;
+            public long sampleAccelerationLimitedAgents;
+            public long sampleTurnLimitedAgents;
+            public string configHash;
             public string stateHash;
             public string canonicalSpatialComparisonHash;
         }
@@ -149,6 +160,16 @@ namespace SwarmECS.Editor
 
                 GC.Collect();
                 double[] samples = new double[sampleTicks];
+                long sampleObstacleOrcaLines = 0L;
+                long sampleAgentOrcaLines = 0L;
+                long sampleAvoidanceObstacleBvhQueries = 0L;
+                long sampleCollisionBvhQueries = 0L;
+                long sampleCollisionBvhCandidates = 0L;
+                long sampleCcdSweepHits = 0L;
+                long sampleSatFallbackRecoveries = 0L;
+                int maxResidualPenetrationRaw = 0;
+                long sampleAccelerationLimitedAgents = 0L;
+                long sampleTurnLimitedAgents = 0L;
                 long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
                 for (int i = 0; i < sampleTicks; i++)
                 {
@@ -156,6 +177,20 @@ namespace SwarmECS.Editor
                     simulation.Step(world);
                     world.AdvanceTick();
                     samples[i] = (Stopwatch.GetTimestamp() - start) * 1000d / Stopwatch.Frequency;
+                    sampleObstacleOrcaLines += simulation.Avoidance.LastObstacleOrcaLines;
+                    sampleAgentOrcaLines += simulation.Avoidance.LastAgentOrcaLines;
+                    sampleAvoidanceObstacleBvhQueries += simulation.Avoidance.LastObstacleBroadphaseQueries;
+                    sampleCollisionBvhQueries += simulation.Obstacles.LastBroadphaseQueries;
+                    sampleCollisionBvhCandidates += simulation.Obstacles.LastBroadphaseCandidates;
+                    sampleCcdSweepHits += simulation.Obstacles.LastSweepHits;
+                    sampleSatFallbackRecoveries += simulation.Obstacles.LastPenetrationRecoveries;
+                    if (simulation.Obstacles.LastMaxResidualDepth.Raw > maxResidualPenetrationRaw)
+                    {
+                        maxResidualPenetrationRaw = simulation.Obstacles.LastMaxResidualDepth.Raw;
+                    }
+
+                    sampleAccelerationLimitedAgents += simulation.Movement.LastAccelerationLimitedAgents;
+                    sampleTurnLimitedAgents += simulation.Movement.LastTurnLimitedAgents;
                 }
 
                 long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
@@ -196,6 +231,17 @@ namespace SwarmECS.Editor
                     pathCacheCapacity = simulation.Navigation.PathCacheCapacity,
                     navigationIslandCount = simulation.Navigation.Islands.RegionCount,
                     sharedWaypointCount = simulation.Navigation.TotalSharedWaypoints,
+                    sampleObstacleOrcaLines = sampleObstacleOrcaLines,
+                    sampleAgentOrcaLines = sampleAgentOrcaLines,
+                    sampleAvoidanceObstacleBvhQueries = sampleAvoidanceObstacleBvhQueries,
+                    sampleCollisionBvhQueries = sampleCollisionBvhQueries,
+                    sampleCollisionBvhCandidates = sampleCollisionBvhCandidates,
+                    sampleCcdSweepHits = sampleCcdSweepHits,
+                    sampleSatFallbackRecoveries = sampleSatFallbackRecoveries,
+                    maxResidualPenetrationRaw = maxResidualPenetrationRaw,
+                    sampleAccelerationLimitedAgents = sampleAccelerationLimitedAgents,
+                    sampleTurnLimitedAgents = sampleTurnLimitedAgents,
+                    configHash = "0x" + config.ConfigHash.ToString("X16"),
                     stateHash = "0x" + world.ComputeStateHash().ToString("X16"),
                     canonicalSpatialComparisonHash =
                         "0x" + ComputeCanonicalSpatialComparisonHash(world).ToString("X16"),
@@ -209,17 +255,8 @@ namespace SwarmECS.Editor
 
         private static SwarmConfig CreateBenchmarkConfig(int agents, SpatialIndexMode mode)
         {
-            SwarmConfig baseline = SwarmConfig.PortfolioDefault(agents);
-            return new SwarmConfig(
-                baseline.Capacity,
-                baseline.FixedDeltaTime,
-                baseline.AgentRadius,
-                baseline.MaxSpeed,
-                baseline.NeighborDistance,
-                baseline.MaxNeighbors,
-                baseline.TimeHorizon,
-                baseline.WorldHalfExtent,
-                mode);
+            SwarmConfig baseline = SwarmConfig.DemoDefault(agents);
+            return baseline.WithSpatialIndexMode(mode);
         }
 
         private static BenchmarkMatrixReport BuildMatrixReport(
@@ -228,7 +265,7 @@ namespace SwarmECS.Editor
             int sampleTicks,
             BenchmarkReport[] reports)
         {
-            SwarmConfig baseline = SwarmConfig.PortfolioDefault(agents);
+            SwarmConfig baseline = SwarmConfig.DemoDefault(agents);
             string[] runOrder = new string[SpatialIndexMatrixModes.Length];
             for (int i = 0; i < SpatialIndexMatrixModes.Length; i++)
             {
@@ -304,11 +341,20 @@ namespace SwarmECS.Editor
                 "- Path requests/tick: " + report.pathRequestBudgetPerTick + "\n" +
                 "- Path cache capacity: " + report.pathCacheCapacity + "\n" +
                 "- Navigation islands/shared waypoints: " + report.navigationIslandCount + "/" + report.sharedWaypointCount + "\n" +
+                "- Sample-total ORCA obstacle/agent lines: " + report.sampleObstacleOrcaLines + "/" + report.sampleAgentOrcaLines + "\n" +
+                "- Sample-total avoidance/collision BVH queries: " +
+                report.sampleAvoidanceObstacleBvhQueries + "/" + report.sampleCollisionBvhQueries + "\n" +
+                "- Sample-total collision candidates / CCD hits / SAT fallback: " +
+                report.sampleCollisionBvhCandidates + "/" + report.sampleCcdSweepHits + "/" + report.sampleSatFallbackRecoveries + "\n" +
+                "- Maximum residual penetration in samples (Q16.16 raw): " + report.maxResidualPenetrationRaw + "\n" +
+                "- Sample-total acceleration/turn limited agents: " +
+                report.sampleAccelerationLimitedAgents + "/" + report.sampleTurnLimitedAgents + "\n" +
                 "- Warmup/sample ticks: " + report.warmupTicks + "/" + report.sampleTicks + "\n" +
                 "- Average: " + report.averageMilliseconds.ToString("F3", CultureInfo.InvariantCulture) + " ms/tick\n" +
                 "- P95: " + report.p95Milliseconds.ToString("F3", CultureInfo.InvariantCulture) + " ms/tick\n" +
                 "- Min/max: " + report.minMilliseconds.ToString("F3", CultureInfo.InvariantCulture) + "/" + report.maxMilliseconds.ToString("F3", CultureInfo.InvariantCulture) + " ms\n" +
                 "- Current-thread managed allocation across samples: " + report.managedBytesAcrossSamples + " B\n" +
+                "- Immutable config hash: `" + report.configHash + "`\n" +
                 "- Final full state hash: `" + report.stateHash + "`\n" +
                 "- Canonical spatial comparison hash: `" + report.canonicalSpatialComparisonHash + "`\n";
         }
@@ -327,8 +373,8 @@ namespace SwarmECS.Editor
                 report.fixedDeltaTimeRaw + "/" + report.neighborDistanceRaw + "\n" +
                 "- Max neighbors: " + report.maxNeighbors + "\n" +
                 "- Warmup/sample ticks per mode: " + report.warmupTicks + "/" + report.sampleTicks + "\n\n" +
-                "| Spatial index | Avoidance execution | Average (ms) | P95 (ms) | Min (ms) | Max (ms) | Current-thread GC (B) | Full state hash | Canonical comparison hash |\n" +
-                "|---|---|---:|---:|---:|---:|---:|---|---|\n";
+                "| Spatial index | Avoidance execution | Average (ms) | P95 (ms) | Min (ms) | Max (ms) | Current-thread GC (B) | Config hash | Full state hash | Canonical comparison hash |\n" +
+                "|---|---|---:|---:|---:|---:|---:|---|---|---|\n";
 
             for (int i = 0; i < report.results.Length; i++)
             {
@@ -341,6 +387,7 @@ namespace SwarmECS.Editor
                     " | " + result.minMilliseconds.ToString("F3", CultureInfo.InvariantCulture) +
                     " | " + result.maxMilliseconds.ToString("F3", CultureInfo.InvariantCulture) +
                     " | " + result.managedBytesAcrossSamples +
+                    " | `" + result.configHash + "`" +
                     " | `" + result.stateHash + "`" +
                     " | `" + result.canonicalSpatialComparisonHash + "` |\n";
             }
