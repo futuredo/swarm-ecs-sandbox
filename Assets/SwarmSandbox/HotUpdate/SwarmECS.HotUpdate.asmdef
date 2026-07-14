@@ -1,0 +1,17 @@
+{
+  "name": "SwarmECS.HotUpdate",
+  "rootNamespace": "SwarmECS.HotUpdate",
+  "references": [
+    "SwarmECS.Core",
+    "SwarmECS.Simulation"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

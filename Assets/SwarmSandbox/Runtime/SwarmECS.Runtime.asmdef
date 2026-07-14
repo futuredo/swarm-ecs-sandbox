@@ -1,0 +1,19 @@
+{
+  "name": "SwarmECS.Runtime",
+  "rootNamespace": "SwarmECS",
+  "references": [
+    "SwarmECS.Core",
+    "SwarmECS.Simulation",
+    "YooAsset",
+    "HybridCLR.Runtime"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

@@ -1,0 +1,22 @@
+{
+  "name": "SwarmECS.Editor",
+  "rootNamespace": "SwarmECS.Editor",
+  "references": [
+    "SwarmECS.Core",
+    "SwarmECS.Simulation",
+    "SwarmECS.Runtime",
+    "HybridCLR.Editor",
+    "YooAsset.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

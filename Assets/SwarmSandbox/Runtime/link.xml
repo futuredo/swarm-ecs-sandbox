@@ -1,0 +1,7 @@
+<linker>
+  <assembly fullname="SwarmECS.Runtime">
+    <type fullname="SwarmECS.Runtime.Commercial.HybridClrAssemblyLoader" preserve="all" />
+    <type fullname="SwarmECS.Runtime.Commercial.SwarmAssetService" preserve="all" />
+  </assembly>
+  <assembly fullname="HybridCLR.Runtime" preserve="all" />
+</linker>

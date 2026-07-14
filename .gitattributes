@@ -1,0 +1,10 @@
+* text=auto eol=lf
+*.unity merge=unityyamlmerge eol=lf whitespace=-blank-at-eol,-blank-at-eof
+*.prefab merge=unityyamlmerge eol=lf whitespace=-blank-at-eol,-blank-at-eof
+*.asset merge=unityyamlmerge eol=lf whitespace=-blank-at-eol,-blank-at-eof
+*.meta merge=unityyamlmerge eol=lf whitespace=-blank-at-eol,-blank-at-eof
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.wav binary
+*.mp3 binary
