@@ -79,6 +79,38 @@ namespace SwarmECS.Tests.EditMode
         }
 
         [Test]
+        public void CommandTimeline_SameTickArrivalOrderDoesNotChangeResult()
+        {
+            SwarmWorld orderedWorld = CreateWorld(8, 17u);
+            SwarmWorld reorderedWorld = CreateWorld(8, 17u);
+            CommandTimeline ordered = new(8);
+            CommandTimeline reordered = new(8);
+            SimulationCommand first = new(
+                3,
+                10,
+                SimulationCommandType.SetGroupTarget,
+                0,
+                new FPVector2(FP.FromInt(10), FP.FromInt(20)));
+            SimulationCommand second = new(
+                3,
+                11,
+                SimulationCommandType.SetGroupTarget,
+                0,
+                new FPVector2(FP.FromInt(-30), FP.FromInt(40)));
+
+            Assert.That(ordered.Add(first), Is.True);
+            Assert.That(ordered.Add(second), Is.True);
+            Assert.That(reordered.Add(second), Is.True);
+            Assert.That(reordered.Add(first), Is.True);
+
+            ordered.ApplyAtTick(orderedWorld, 3);
+            reordered.ApplyAtTick(reorderedWorld, 3);
+
+            Assert.That(reorderedWorld.GroupTargets[0], Is.EqualTo(orderedWorld.GroupTargets[0]));
+            Assert.That(reorderedWorld.GroupTargets[0], Is.EqualTo(second.Value));
+        }
+
+        [Test]
         public void SharedAStarRoutes_AreGeneratedForAllFourSquads()
         {
             SwarmWorld world = CreateWorld(32, 7u);

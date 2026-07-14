@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.IO;
 using UnityEngine;
 
@@ -15,7 +16,8 @@ namespace SwarmECS.Runtime
         private SwarmSimulationHost _host;
         private string _capturePath;
         private float _captureTime;
-        private bool _captured;
+        private bool _captureRequested;
+        private bool _captureCompleted;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void InstallWhenRequested()
@@ -40,26 +42,42 @@ namespace SwarmECS.Runtime
                 return;
             }
 
-            if (!_captured)
+            if (!_captureRequested)
             {
-                string directory = Path.GetDirectoryName(_capturePath);
-                if (!string.IsNullOrEmpty(directory))
-                {
-                    Directory.CreateDirectory(directory);
-                }
-
-                ScreenCapture.CaptureScreenshot(_capturePath, 1);
-                _captureTime = Time.realtimeSinceStartup;
-                _captured = true;
-                Debug.Log($"[SwarmECS] Player capture requested: {_capturePath}");
+                _captureRequested = true;
+                StartCoroutine(CaptureAtEndOfFrame());
                 return;
             }
 
-            if (Time.realtimeSinceStartup - _captureTime >= QuitDelaySeconds && File.Exists(_capturePath))
+            if (_captureCompleted && Time.realtimeSinceStartup - _captureTime >= QuitDelaySeconds)
             {
                 Debug.Log("[SwarmECS] Player capture completed.");
                 Application.Quit(0);
             }
+        }
+
+        private IEnumerator CaptureAtEndOfFrame()
+        {
+            yield return new WaitForEndOfFrame();
+
+            string directory = Path.GetDirectoryName(_capturePath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            Texture2D screenshot = new(Screen.width, Screen.height, TextureFormat.RGB24, false)
+            {
+                name = "Swarm Automated Capture",
+            };
+            screenshot.ReadPixels(new Rect(0f, 0f, Screen.width, Screen.height), 0, 0, false);
+            screenshot.Apply(false, false);
+            File.WriteAllBytes(_capturePath, screenshot.EncodeToPNG());
+            Destroy(screenshot);
+
+            _captureTime = Time.realtimeSinceStartup;
+            _captureCompleted = true;
+            Debug.Log($"[SwarmECS] Player capture written: {_capturePath}");
         }
 
         private static string ReadArgument(string name)

@@ -40,29 +40,29 @@ namespace SwarmECS.Runtime
             GUI.Label(new Rect(30f, 60f, panelWidth - 32f, panelHeight - 150f), _cachedMetrics, _bodyStyle);
 
             float y = panel.yMax - 78f;
-            if (GUI.Button(new Rect(28f, y, 82f, 28f), _host.IsPaused ? "继续" : "暂停"))
+            if (GUI.Button(new Rect(28f, y, 82f, 28f), _host.IsPaused ? "RESUME" : "PAUSE"))
             {
                 _host.TogglePause();
             }
 
-            if (GUI.Button(new Rect(116f, y, 82f, 28f), "延迟包"))
+            if (GUI.Button(new Rect(116f, y, 82f, 28f), "LATE CMD"))
             {
                 _host.InjectLateCorrection();
             }
 
-            if (GUI.Button(new Rect(204f, y, 82f, 28f), "追 600 帧"))
+            if (GUI.Button(new Rect(204f, y, 82f, 28f), "CATCH UP"))
             {
                 _host.QueueCatchUp();
             }
 
-            if (GUI.Button(new Rect(292f, y, 82f, 28f), "切换索引"))
+            if (GUI.Button(new Rect(292f, y, 82f, 28f), "GRID / KD"))
             {
                 _host.ToggleSpatialIndex();
             }
 
             GUI.Label(
                 new Rect(30f, panel.yMax - 42f, panelWidth - 30f, 24f),
-                "Space 暂停 · L 回滚 · T 追帧 · K Grid/KD · R 重置 · WASD/滚轮 相机",
+                "SPACE pause | L rollback | T catch-up | K index | R reset | WASD move",
                 _goodStyle);
         }
 

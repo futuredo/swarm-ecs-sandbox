@@ -15,9 +15,9 @@
 - **微观 RVO2 / ORCA**：手写速度障碍与线性规划 LP1/LP2/LP3；持久工作线程按确定区间并行计算，不使用每帧 `Task`、LINQ 或临时容器。
 - **定点数 SAT**：OBB/圆碰撞与静态障碍穿透修正，完全脱离 Unity Physics。
 - **Rollback / Catch-up**：64 帧预分配快照环、确定性命令时间线、延迟权威指令回滚重演，以及跳过渲染的快速追帧。
-- **GPU Driven 表现**：Agent 数据写入 `ComputeBuffer`，通过 `Graphics.DrawMeshInstancedIndirect` 一次间接实例化绘制 10,000 个单位；没有单位 GameObject。
+- **GPU Driven 表现**：Agent 数据写入 `GraphicsBuffer`，通过 Unity 6 的 `Graphics.RenderMeshIndirect` 一次间接实例化绘制 10,000 个单位；没有单位 GameObject。
 - **商业化边界**：已固定并配置 YooAsset 3.0.4 与 HybridCLR 8.12.0，热更程序集、AOT 元数据加载和资源包收集器保持在仿真层之外。
-- **工程验证**：43 个 EditMode 测试覆盖定点数边界、空间查询、A*、SAT、ORCA、双世界逐位一致、回滚一致与热路径零 GC。
+- **工程验证**：44 个 EditMode 测试覆盖定点数边界、空间查询、A*、SAT、ORCA、乱序命令、双世界逐位一致、回滚一致与热路径零 GC。
 
 ## 可复现基准
 
@@ -78,6 +78,8 @@ SWARM_AGENT_COUNT=10000 SWARM_WARMUP_TICKS=8 SWARM_SAMPLE_TICKS=32 \
 
 结果会覆盖 `BenchmarkResults/latest.json` 与 `latest.md`。
 
+GitHub Actions 默认在 push/PR 上执行无需许可证的静态工程检查。配置 `UNITY_LICENSE`（或 Unity Personal 所需凭据）并将仓库变量 `UNITY_CI_ENABLED` 设为 `true` 后，才启用 GameCI EditMode job，避免公开仓库在未配置许可证时产生误导性的红色构建。
+
 ## 代码地图
 
 ```text
@@ -91,7 +93,7 @@ Assets/SwarmSandbox/
 ├── Simulation/Collision     定点数 SAT
 ├── Simulation/Netcode       Command Timeline / Snapshot Ring / Rollback
 ├── Simulation/Systems       确定性系统流水线与持久并行工作线程
-├── Runtime/Rendering        GPU Indirect Instancing
+├── Runtime/Rendering        GraphicsBuffer / RenderMeshIndirect
 ├── Runtime/Commercial       YooAsset / HybridCLR 运行时边界
 └── Editor                   场景、基准、构建与商业管线配置工具
 ```
@@ -102,6 +104,7 @@ Assets/SwarmSandbox/
 - [`Docs/DETERMINISM_AND_NETCODE.md`](Docs/DETERMINISM_AND_NETCODE.md)：确定性契约、状态哈希、Rollback 与追帧
 - [`Docs/COMMERCIAL_PIPELINE.md`](Docs/COMMERCIAL_PIPELINE.md)：YooAsset + HybridCLR 的真实接入边界
 - [`Docs/INTERVIEW_GUIDE.md`](Docs/INTERVIEW_GUIDE.md)：面试讲解路线、权衡与可继续扩展项
+- [`Docs/ROADMAP_2027.md`](Docs/ROADMAP_2027.md)：14–18 周强化计划、量化验收与简历产出
 
 ## 项目边界
 
@@ -109,4 +112,4 @@ Assets/SwarmSandbox/
 
 ## License
 
-[MIT](LICENSE)
+项目自有源码使用 [MIT](LICENSE)；YooAsset、HybridCLR 与 Unity 组件继续适用各自许可证，详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。

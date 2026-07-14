@@ -16,8 +16,8 @@ flowchart LR
     F --> G["SAT Obstacle Resolve"]
     G --> H["SoA World State"]
     H --> I["Snapshot + State Hash"]
-    H -. "presentation copy" .-> J["ComputeBuffer"]
-    J --> K["DrawMeshInstancedIndirect"]
+    H -. "presentation copy" .-> J["GraphicsBuffer"]
+    J --> K["RenderMeshIndirect"]
 ```
 
 系统顺序固定。ORCA 为每个实体只写自己的 `NextVelocities[i]`；移动积分在全部避障任务结束后统一读取，因此并行执行不会形成“先更新的单位影响后更新单位”的次序依赖。
@@ -74,7 +74,7 @@ PathCursors[]         ushort
 
 碰撞阶段使用定点数圆/OBB 和 OBB/OBB SAT。当前位置被静态障碍推出最小穿透轴，并消除朝向障碍的速度分量。项目没有调用 Unity Physics。
 
-渲染器在 `LateUpdate` 将 Q16.16 位置转换成表现层 `float`，上传到结构化 GPU buffer。Mesh、材质、args buffer 与实例数据 buffer 都复用；10,000 个 Agent 使用一次 `DrawMeshInstancedIndirect`。地面、障碍和 HUD 是独立表现 draw，不属于 Agent batch。
+渲染器在 `LateUpdate` 将 Q16.16 位置转换成表现层 `float`，上传到结构化 `GraphicsBuffer`。Mesh、材质、args buffer 与实例数据 buffer 都复用；10,000 个 Agent 使用一次 Unity 6 `RenderMeshIndirect`。地面、障碍和 HUD 是独立表现 draw，不属于 Agent batch。
 
 ## 内存与 GC 策略
 

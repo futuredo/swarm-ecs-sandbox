@@ -25,7 +25,8 @@ public sealed class SwarmIndirectRenderer : IDisposable
 
     private readonly int _capacity;
     private readonly AgentGpuData[] _uploadData;
-    private readonly uint[] _indirectArgs = new uint[5];
+    private readonly GraphicsBuffer.IndirectDrawIndexedArgs[] _indirectArgs =
+        new GraphicsBuffer.IndirectDrawIndexedArgs[1];
     private readonly MaterialPropertyBlock _properties;
     private readonly Bounds _bounds;
     private readonly Mesh _agentMesh;
@@ -36,8 +37,9 @@ public sealed class SwarmIndirectRenderer : IDisposable
     private readonly Material _obstacleMaterial;
     private readonly Matrix4x4[] _obstacleMatrices = new Matrix4x4[32];
     private int _obstacleCount;
-    private ComputeBuffer _agentBuffer;
-    private ComputeBuffer _argsBuffer;
+    private GraphicsBuffer _agentBuffer;
+    private GraphicsBuffer _argsBuffer;
+    private RenderParams _agentRenderParams;
     private bool _disposed;
 
     public SwarmIndirectRenderer(int capacity, float worldHalfExtent)
@@ -76,17 +78,32 @@ public sealed class SwarmIndirectRenderer : IDisposable
         _groundMesh = CreateGroundMesh(worldHalfExtent);
         _obstacleMesh = CreateObstacleMesh();
 
-        _agentBuffer = new ComputeBuffer(capacity, Marshal.SizeOf<AgentGpuData>(), ComputeBufferType.Structured);
-        _argsBuffer = new ComputeBuffer(1, sizeof(uint) * 5, ComputeBufferType.IndirectArguments);
-        _indirectArgs[0] = _agentMesh.GetIndexCount(0);
-        _indirectArgs[1] = 0;
-        _indirectArgs[2] = _agentMesh.GetIndexStart(0);
-        _indirectArgs[3] = _agentMesh.GetBaseVertex(0);
-        _indirectArgs[4] = 0;
+        _agentBuffer = new GraphicsBuffer(
+            GraphicsBuffer.Target.Structured,
+            capacity,
+            Marshal.SizeOf<AgentGpuData>());
+        _argsBuffer = new GraphicsBuffer(
+            GraphicsBuffer.Target.IndirectArguments,
+            1,
+            GraphicsBuffer.IndirectDrawIndexedArgs.size);
+        _indirectArgs[0].indexCountPerInstance = _agentMesh.GetIndexCount(0);
+        _indirectArgs[0].instanceCount = 0;
+        _indirectArgs[0].startIndex = _agentMesh.GetIndexStart(0);
+        _indirectArgs[0].baseVertexIndex = _agentMesh.GetBaseVertex(0);
+        _indirectArgs[0].startInstance = 0;
         _argsBuffer.SetData(_indirectArgs);
 
         _properties.SetBuffer(AgentDataId, _agentBuffer);
         _properties.SetFloat(AgentScaleId, 0.92f);
+        _agentRenderParams = new RenderParams(_agentMaterial)
+        {
+            worldBounds = _bounds,
+            matProps = _properties,
+            shadowCastingMode = ShadowCastingMode.Off,
+            receiveShadows = false,
+            layer = 0,
+            lightProbeUsage = LightProbeUsage.Off,
+        };
     }
 
     public void Render(SwarmWorld world)
@@ -113,9 +130,9 @@ public sealed class SwarmIndirectRenderer : IDisposable
         }
 
         _agentBuffer.SetData(_uploadData, 0, 0, count);
-        if (_indirectArgs[1] != (uint)count)
+        if (_indirectArgs[0].instanceCount != (uint)count)
         {
-            _indirectArgs[1] = (uint)count;
+            _indirectArgs[0].instanceCount = (uint)count;
             _argsBuffer.SetData(_indirectArgs);
         }
 
@@ -150,22 +167,7 @@ public sealed class SwarmIndirectRenderer : IDisposable
                 null);
         }
 
-#pragma warning disable CS0618
-        Graphics.DrawMeshInstancedIndirect(
-            _agentMesh,
-            0,
-            _agentMaterial,
-            _bounds,
-            _argsBuffer,
-            0,
-            _properties,
-            ShadowCastingMode.Off,
-            false,
-            0,
-            null,
-            LightProbeUsage.Off,
-            null);
-#pragma warning restore CS0618
+        Graphics.RenderMeshIndirect(_agentRenderParams, _agentMesh, _argsBuffer);
     }
 
     public void SetObstacles(FPOrientedBox2[] obstacles)

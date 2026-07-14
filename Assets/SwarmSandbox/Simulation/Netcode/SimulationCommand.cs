@@ -62,7 +62,15 @@ public sealed class CommandTimeline
             return false;
         }
 
-        _commands[_count++] = command;
+        int insertionIndex = _count;
+        while (insertionIndex > 0 && ComesBefore(command, _commands[insertionIndex - 1]))
+        {
+            _commands[insertionIndex] = _commands[insertionIndex - 1];
+            insertionIndex--;
+        }
+
+        _commands[insertionIndex] = command;
+        _count++;
         return true;
     }
 
@@ -71,6 +79,11 @@ public sealed class CommandTimeline
         for (int i = 0; i < _count; i++)
         {
             SimulationCommand command = _commands[i];
+            if (command.Tick > tick)
+            {
+                break;
+            }
+
             if (command.Tick != tick)
             {
                 continue;
@@ -86,6 +99,12 @@ public sealed class CommandTimeline
     public void Clear()
     {
         _count = 0;
+    }
+
+    private static bool ComesBefore(SimulationCommand left, SimulationCommand right)
+    {
+        return left.Tick < right.Tick ||
+            (left.Tick == right.Tick && left.Sequence < right.Sequence);
     }
 }
 }

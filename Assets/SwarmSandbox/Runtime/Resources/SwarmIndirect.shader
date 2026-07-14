@@ -18,6 +18,8 @@ Shader "SwarmECS/IndirectAgent"
             #pragma fragment Frag
             #pragma multi_compile_instancing
             #include "UnityCG.cginc"
+            #define UNITY_INDIRECT_DRAW_ARGS IndirectDrawIndexedArgs
+            #include "UnityIndirect.cginc"
 
             struct AgentGpuData
             {
@@ -52,8 +54,10 @@ Shader "SwarmECS/IndirectAgent"
 
             Varyings Vert(Attributes input)
             {
+                InitIndirectDrawArgs(0);
                 Varyings output;
-                AgentGpuData agent = _AgentData[input.instanceID];
+                uint agentIndex = GetIndirectInstanceID(input.instanceID);
+                AgentGpuData agent = _AgentData[agentIndex];
                 float2 velocity = agent.positionVelocity.zw;
                 float speed = length(velocity);
                 float2 forward = speed > 0.001 ? velocity / speed : float2(0.0, 1.0);

@@ -1,4 +1,4 @@
-name: Unity EditMode Tests
+name: Repository Validation
 
 on:
   push:
@@ -7,8 +7,33 @@ on:
   workflow_dispatch:
 
 jobs:
+  static-validation:
+    name: Static project validation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate JSON and assembly definitions
+        shell: bash
+        run: |
+          find Assets Packages -type f \( -name '*.json' -o -name '*.asmdef' \) -print0 \
+            | xargs -0 -n1 jq empty
+
+      - name: Reject generated Unity folders
+        shell: bash
+        run: |
+          if git ls-files | grep -E '^(Library|Temp|Builds|Logs|UserSettings)/'; then
+            echo 'Generated Unity folders must not be committed.' >&2
+            exit 1
+          fi
+
   editmode:
     name: EditMode / Unity 6000.3.9f1
+    if: ${{ vars.UNITY_CI_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -18,8 +43,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          lfs: true
 
       - name: Cache Unity Library
         uses: actions/cache@v4

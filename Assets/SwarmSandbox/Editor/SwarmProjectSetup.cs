@@ -67,7 +67,15 @@ namespace SwarmECS.Editor
 
         public static void BuildMacPlayerFromCommandLine()
         {
-            CreateOrRefreshProject();
+            if (!File.Exists(ScenePath))
+            {
+                CreateOrRefreshProject();
+            }
+            else if (!IsSceneEnabledInBuildSettings())
+            {
+                EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
+            }
+
             string projectRoot = Directory.GetParent(Application.dataPath).FullName;
             string outputPath = Path.Combine(projectRoot, "Builds", "macOS", "SwarmECS.app");
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath));
@@ -106,6 +114,19 @@ namespace SwarmECS.Editor
                 HybridCLR.Editor.Settings.HybridCLRSettings.Instance.enable = previousHybridClrEnabled;
                 HybridCLR.Editor.Settings.HybridCLRSettings.Save();
             }
+        }
+
+        private static bool IsSceneEnabledInBuildSettings()
+        {
+            foreach (EditorBuildSettingsScene scene in EditorBuildSettings.scenes)
+            {
+                if (scene.enabled && scene.path == ScenePath)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }
