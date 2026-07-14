@@ -47,7 +47,7 @@ v0.2.1 Navigation Completeness（当前公开基线）
 
 ### 当前证据范围
 
-- 2026-07-14 在 v0.2.1 源码上本地运行 Unity 6000.3.9f1 EditMode：**77 / 77 Passed，0 failed/skipped**（0.9254662 秒）。`TestResults/` 默认不入库，XML 作为 Release artifact 附件公开。
+- 2026-07-14 在 v0.2.1 源码上本地运行 Unity 6000.3.9f1 EditMode：**77 / 77 Passed，0 failed/skipped**。`TestResults/` 默认不入库，XML 作为 Release artifact 附件公开；耗时以该附件为准。
 - 仓库跟踪的 10k headless 短基准：Apple M5 Pro、8 warmup + 32 sample、Uniform Grid；平均 **19.919240625 ms**、P95 **24.5924 ms**、17.0747/26.0361 ms min/max、current-thread **0 B**。运行时使用 caller + 14 workers，full/canonical hash 均为 `0x4BD5680667C14261`；原始值见 `BenchmarkResults/latest.json`。
 - 同配置三模式端到端矩阵：Uniform Grid 18.73074375/21.2342 ms、KD radius 114.1174875/125.944 ms、KD exact KNN 98.874775/108.3109 ms（average/P95）；min/max 分别为 16.8525/22.6702、104.8276/127.9858、90.9214/109.7333 ms，三者 current-thread 均为 0 B。Uniform Grid 使用 caller + 14 workers，KD 当前使用 caller thread；该结果不是隔离 spatial query 的微基准。
 - 三模式 full hash 因包含权威 `SpatialIndexMode` 而不同；只归一化该字段后的 canonical hash 均为 `0x4BD5680667C14261`。Grid/KD radius 的一致值证明本次相同 seed/config 下的权威结果等价；KNN 的一致值只描述当前场景，不能泛化为不同选邻语义永远等价。

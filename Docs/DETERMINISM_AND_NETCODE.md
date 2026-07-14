@@ -132,7 +132,7 @@ sequenceDiagram
 
 ## 7. 当前证据
 
-- 2026-07-14 v0.2.1 完整 Unity EditMode：**77 / 77 Passed，0 failed/skipped**（0.9254662 秒）；公开证据以对应 Release XML 为准。
+- 2026-07-14 v0.2.1 完整 Unity EditMode：**77 / 77 Passed，0 failed/skipped**；公开证据与具体耗时以对应 Release XML 为准。
 - 双 World 同 seed / 同命令保持相同 hash。
 - 指令准时到达与延迟到达后 rollback 的最终状态一致；同 tick、同 Group 的 sequence 0/1 即使按 1/0 乱序抵达，replay 后仍以原 sequence 得到相同 target/hash。
 - 多组动态目标形成 path backlog 时，默认每 tick 只处理 1 个，并在 rollback 后得到相同 `GroupPathState` / hash。

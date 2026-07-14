@@ -66,7 +66,7 @@ mkdir -p TestResults
   -logFile "$PWD/TestResults/editmode.log"
 ```
 
-- [ ] `TestResults/editmode.xml` 的 `result="Passed"`、`passed="77"`、`failed="0"`、`skipped="0"`，且 duration 为 `0.9254662`、用例数与 README 一致。
+- [ ] `TestResults/editmode.xml` 的 `result="Passed"`、`passed="77"`、`failed="0"`、`skipped="0"`，且用例数与 README 一致；duration 是本次运行的环境数据，不写死为历史值。
 - [ ] 检查 `editmode.log` 没有编译错误、未处理异常或测试发现失败。
 - [ ] 保留 XML 和 log，不提交到仓库；Release 时作为原始附件上传。
 - [ ] Release notes 标注这是本地 Unity 结果还是可选 GameCI 结果，不混淆两者。
