@@ -40,7 +40,7 @@ public sealed class NeighborAvoidanceSystem : IDisposable
         Mode = config.SpatialIndexMode;
     }
 
-    public SpatialIndexMode Mode { get; set; }
+    public SpatialIndexMode Mode { get; private set; }
 
     public int BackgroundWorkerCount => _workerPool?.BackgroundWorkerCount ?? 0;
 
@@ -60,10 +60,16 @@ public sealed class NeighborAvoidanceSystem : IDisposable
             throw new ArgumentNullException(nameof(world));
         }
 
-        if (Mode == SpatialIndexMode.KdTree)
+        Mode = world.SpatialIndexMode;
+
+        if (Mode == SpatialIndexMode.KdTree || Mode == SpatialIndexMode.KdTreeKNearest)
         {
             _kdTree.Build(world.Positions, world.Count);
-            ExecuteKdTree(world, out int kdNeighborLinks, out int kdOrcaLines);
+            ExecuteKdTree(
+                world,
+                Mode == SpatialIndexMode.KdTreeKNearest,
+                out int kdNeighborLinks,
+                out int kdOrcaLines);
             LastNeighborLinks = kdNeighborLinks;
             LastOrcaLines = kdOrcaLines;
             return;
@@ -164,6 +170,7 @@ public sealed class NeighborAvoidanceSystem : IDisposable
 
     private void ExecuteKdTree(
         SwarmWorld world,
+        bool useKNearest,
         out int neighborLinks,
         out int orcaLines)
     {
@@ -171,11 +178,25 @@ public sealed class NeighborAvoidanceSystem : IDisposable
         orcaLines = 0;
         for (int i = 0; i < world.Count; ++i)
         {
-            _kdTree.QueryRadius(
-                world.Positions[i],
-                world.Config.NeighborDistance,
-                _kdQueryResults,
-                out int queryCount);
+            int queryCount;
+            if (useKNearest)
+            {
+                // QueryLimit reserves one slot for the querying entity itself.
+                // Filtering below therefore still yields at most MaxNeighbors.
+                _kdTree.QueryKNearest(
+                    world.Positions[i],
+                    _mainScratch.QueryLimit,
+                    _kdQueryResults,
+                    out queryCount);
+            }
+            else
+            {
+                _kdTree.QueryRadius(
+                    world.Positions[i],
+                    world.Config.NeighborDistance,
+                    _kdQueryResults,
+                    out queryCount);
+            }
 
             int neighborCount = 0;
             for (int resultIndex = 0;

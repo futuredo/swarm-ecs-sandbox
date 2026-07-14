@@ -1,5 +1,6 @@
 using System;
 using SwarmECS.FixedPoint;
+using SwarmECS.Simulation.Pathfinding;
 
 namespace SwarmECS.Simulation
 {
@@ -26,6 +27,7 @@ public sealed class SwarmWorld
         Groups = new byte[config.Capacity];
         PathCursors = new ushort[config.Capacity];
         GroupTargets = new FPVector2[GroupCount];
+        GroupPathStates = new GroupPathState[GroupCount];
     }
 
     public SwarmConfig Config { get; }
@@ -52,6 +54,13 @@ public sealed class SwarmWorld
 
     public FPVector2[] GroupTargets { get; }
 
+    /// <summary>Rollback-authoritative shared path request/result state.</summary>
+    public GroupPathState[] GroupPathStates { get; }
+
+    public int NextPathRequestSequence { get; internal set; }
+
+    public SpatialIndexMode SpatialIndexMode { get; internal set; }
+
     public int Count { get; private set; }
 
     public int Tick { get; internal set; }
@@ -63,7 +72,14 @@ public sealed class SwarmWorld
         Count = requestedCount < 0 ? 0 : Math.Min(requestedCount, Config.Capacity);
         Seed = seed;
         Tick = 0;
+        NextPathRequestSequence = 0;
+        SpatialIndexMode = Config.SpatialIndexMode;
         Entities.Reset();
+
+        for (int group = 0; group < GroupCount; group++)
+        {
+            GroupPathStates[group] = GroupPathState.CreateEmpty();
+        }
 
         GroupTargets[0] = new FPVector2(FP.FromInt(46), FP.FromInt(46));
         GroupTargets[1] = new FPVector2(FP.FromInt(-46), FP.FromInt(46));
@@ -132,6 +148,16 @@ public sealed class SwarmWorld
         GroupTargets[group] = target;
     }
 
+    public void SetSpatialIndexMode(SpatialIndexMode mode)
+    {
+        if ((uint)mode > (uint)SpatialIndexMode.KdTreeKNearest)
+        {
+            throw new ArgumentOutOfRangeException(nameof(mode));
+        }
+
+        SpatialIndexMode = mode;
+    }
+
     public void AdvanceTick()
     {
         Tick++;
@@ -145,12 +171,24 @@ public sealed class SwarmWorld
         hash = MixHash(hash, Tick, prime);
         hash = MixHash(hash, Count, prime);
         hash = MixHash(hash, unchecked((int)Seed), prime);
+        hash = MixHash(hash, (int)SpatialIndexMode, prime);
 
         for (int i = 0; i < GroupCount; i++)
         {
             hash = MixHash(hash, GroupTargets[i].X.Raw, prime);
             hash = MixHash(hash, GroupTargets[i].Y.Raw, prime);
+            GroupPathState pathState = GroupPathStates[i];
+            hash = MixHash(hash, pathState.ResolvedStartIndex, prime);
+            hash = MixHash(hash, pathState.ResolvedGoalIndex, prime);
+            hash = MixHash(hash, pathState.ResolvedMapRevision, prime);
+            hash = MixHash(hash, (int)pathState.Status, prime);
+            hash = MixHash(hash, pathState.PendingStartIndex, prime);
+            hash = MixHash(hash, pathState.PendingGoalIndex, prime);
+            hash = MixHash(hash, pathState.PendingMapRevision, prime);
+            hash = MixHash(hash, pathState.PendingSequence, prime);
         }
+
+        hash = MixHash(hash, NextPathRequestSequence, prime);
 
         for (int i = 0; i < Count; i++)
         {

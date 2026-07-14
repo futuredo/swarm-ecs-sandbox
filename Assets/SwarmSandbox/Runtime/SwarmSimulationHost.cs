@@ -33,6 +33,7 @@ namespace SwarmECS.Runtime
         private ulong _currentHash;
         private bool _paused;
         private bool _determinismProbePassed;
+        private SpatialIndexMode _requestedSpatialIndexMode;
         private int _renderFrameCount;
         private float _fpsWindowStart;
         private float _measuredFps;
@@ -149,9 +150,18 @@ namespace SwarmECS.Runtime
                 return;
             }
 
-            _simulation.Avoidance.Mode = _simulation.Avoidance.Mode == SpatialIndexMode.UniformGrid
-                ? SpatialIndexMode.KdTree
-                : SpatialIndexMode.UniformGrid;
+            SpatialIndexMode nextMode = _requestedSpatialIndexMode switch
+            {
+                SpatialIndexMode.UniformGrid => SpatialIndexMode.KdTree,
+                SpatialIndexMode.KdTree => SpatialIndexMode.KdTreeKNearest,
+                _ => SpatialIndexMode.UniformGrid,
+            };
+            // Apply on the next logic tick through the same ordered command
+            // timeline used by rollback, so replay crosses mode switches safely.
+            if (_rollback.QueueSpatialIndexMode(nextMode))
+            {
+                _requestedSpatialIndexMode = nextMode;
+            }
         }
 
         public void QueueCatchUp(int ticks = 600)
@@ -175,7 +185,12 @@ namespace SwarmECS.Runtime
                 new(FP.FromInt(-62), FP.FromInt(20)),
                 new(FP.FromInt(20), FP.FromInt(-62)),
             };
-            _rollback.InjectLateGroupTarget(simulatedLatencyTicks, group, targets[group]);
+            // Local visualization only: a real network path must pass the server's complete
+            // SimulationCommand (including its original tick/sequence) to InjectLateCommand.
+            _rollback.InjectLocallyGeneratedLateGroupTarget(
+                simulatedLatencyTicks,
+                group,
+                targets[group]);
             _currentHash = _world.ComputeStateHash();
         }
 
@@ -192,6 +207,7 @@ namespace SwarmECS.Runtime
             SwarmConfig config = SwarmConfig.PortfolioDefault(count);
             _world = new SwarmWorld(config);
             _world.InitializeDeterministicFormation(count, deterministicSeed);
+            _requestedSpatialIndexMode = config.SpatialIndexMode;
             _simulation = new SwarmSimulation(_world);
             _rollback = new RollbackController(_world, _simulation, 64, 512);
             _renderer = new SwarmIndirectRenderer(count, (float)config.WorldHalfExtent.ToDouble());

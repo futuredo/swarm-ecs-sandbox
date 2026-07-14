@@ -16,7 +16,8 @@ namespace SwarmECS.Simulation.Spatial
         private readonly int[] _rightNode;
         private readonly byte[] _splitAxis;
         private readonly int[] _queryEntities;
-        private readonly FP[] _queryDistances;
+        private readonly ulong[] _queryDistances;
+        private readonly WideSquaredDistance[] _knnDistances;
 
         private FPVector2[] _positions;
         private int _entityCount;
@@ -24,7 +25,7 @@ namespace SwarmECS.Simulation.Spatial
         private int _rootNode = -1;
         private int _radiusMatchCount;
         private FPVector2 _queryCenter;
-        private FP _queryRadiusSquared;
+        private ulong _queryRadiusSquared;
         private int _knnLimit;
         private int _knnCount;
 
@@ -42,7 +43,8 @@ namespace SwarmECS.Simulation.Spatial
             _rightNode = new int[capacity];
             _splitAxis = new byte[capacity];
             _queryEntities = new int[capacity];
-            _queryDistances = new FP[capacity];
+            _queryDistances = new ulong[capacity];
+            _knnDistances = new WideSquaredDistance[capacity];
         }
 
         public int Capacity => _capacity;
@@ -95,7 +97,7 @@ namespace SwarmECS.Simulation.Spatial
             }
 
             _queryCenter = center;
-            _queryRadiusSquared = radius * radius;
+            _queryRadiusSquared = SpatialQueryDistance.Square(radius.Raw);
             _radiusMatchCount = 0;
             RadiusSearch(_rootNode);
 
@@ -250,7 +252,7 @@ namespace SwarmECS.Simulation.Spatial
 
             int entity = _entityAtNode[node];
             FPVector2 position = _positions[entity];
-            FP distanceSquared = (position - _queryCenter).SqrMagnitude;
+            ulong distanceSquared = SpatialQueryDistance.Squared(position, _queryCenter);
             if (distanceSquared <= _queryRadiusSquared)
             {
                 _queryEntities[_radiusMatchCount] = entity;
@@ -258,11 +260,13 @@ namespace SwarmECS.Simulation.Spatial
                 ++_radiusMatchCount;
             }
 
-            FP delta = _splitAxis[node] == 0 ? _queryCenter.X - position.X : _queryCenter.Y - position.Y;
-            int near = delta <= FP.Zero ? _leftNode[node] : _rightNode[node];
-            int far = delta <= FP.Zero ? _rightNode[node] : _leftNode[node];
+            long deltaRaw = _splitAxis[node] == 0
+                ? (long)_queryCenter.X.Raw - position.X.Raw
+                : (long)_queryCenter.Y.Raw - position.Y.Raw;
+            int near = deltaRaw <= 0 ? _leftNode[node] : _rightNode[node];
+            int far = deltaRaw <= 0 ? _rightNode[node] : _leftNode[node];
             RadiusSearch(near);
-            if (delta * delta <= _queryRadiusSquared)
+            if (SpatialQueryDistance.Square(deltaRaw) <= _queryRadiusSquared)
             {
                 RadiusSearch(far);
             }
@@ -277,25 +281,34 @@ namespace SwarmECS.Simulation.Spatial
 
             int entity = _entityAtNode[node];
             FPVector2 position = _positions[entity];
-            FP distanceSquared = (position - _queryCenter).SqrMagnitude;
+            WideSquaredDistance distanceSquared = SpatialQueryDistance.SquaredWide(
+                position,
+                _queryCenter);
             InsertKnnCandidate(entity, distanceSquared);
 
-            FP delta = _splitAxis[node] == 0 ? _queryCenter.X - position.X : _queryCenter.Y - position.Y;
-            int near = delta <= FP.Zero ? _leftNode[node] : _rightNode[node];
-            int far = delta <= FP.Zero ? _rightNode[node] : _leftNode[node];
+            long deltaRaw = _splitAxis[node] == 0
+                ? (long)_queryCenter.X.Raw - position.X.Raw
+                : (long)_queryCenter.Y.Raw - position.Y.Raw;
+            int near = deltaRaw <= 0 ? _leftNode[node] : _rightNode[node];
+            int far = deltaRaw <= 0 ? _rightNode[node] : _leftNode[node];
             KNearestSearch(near);
 
-            FP worstDistance = _knnCount < _knnLimit ? FP.FromRaw(int.MaxValue) : _queryDistances[_knnCount - 1];
-            if (delta * delta <= worstDistance)
+            if (_knnCount < _knnLimit || SpatialQueryDistance.AxisSquareIsWithin(
+                SpatialQueryDistance.Square(deltaRaw),
+                _knnDistances[_knnCount - 1]))
             {
                 KNearestSearch(far);
             }
         }
 
-        private void InsertKnnCandidate(int entity, FP distanceSquared)
+        private void InsertKnnCandidate(int entity, WideSquaredDistance distanceSquared)
         {
             int insertion = _knnCount;
-            while (insertion > 0 && ComesBefore(distanceSquared, entity, _queryDistances[insertion - 1], _queryEntities[insertion - 1]))
+            while (insertion > 0 && ComesBefore(
+                distanceSquared,
+                entity,
+                _knnDistances[insertion - 1],
+                _queryEntities[insertion - 1]))
             {
                 --insertion;
             }
@@ -308,18 +321,24 @@ namespace SwarmECS.Simulation.Spatial
             int newCount = _knnCount < _knnLimit ? _knnCount + 1 : _knnCount;
             for (int i = newCount - 1; i > insertion; --i)
             {
-                _queryDistances[i] = _queryDistances[i - 1];
+                _knnDistances[i] = _knnDistances[i - 1];
                 _queryEntities[i] = _queryEntities[i - 1];
             }
 
-            _queryDistances[insertion] = distanceSquared;
+            _knnDistances[insertion] = distanceSquared;
             _queryEntities[insertion] = entity;
             _knnCount = newCount;
         }
 
-        private static bool ComesBefore(FP leftDistance, int leftEntity, FP rightDistance, int rightEntity)
+        private static bool ComesBefore(
+            WideSquaredDistance leftDistance,
+            int leftEntity,
+            WideSquaredDistance rightDistance,
+            int rightEntity)
         {
-            return leftDistance < rightDistance || (leftDistance == rightDistance && leftEntity < rightEntity);
+            int comparison = SpatialQueryDistance.Compare(leftDistance, rightDistance);
+            return comparison < 0 || (comparison == 0 && leftEntity < rightEntity);
         }
+
     }
 }

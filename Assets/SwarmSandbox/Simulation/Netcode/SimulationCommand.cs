@@ -6,6 +6,7 @@ namespace SwarmECS.Simulation.Netcode
 public enum SimulationCommandType : byte
 {
     SetGroupTarget = 0,
+    SetSpatialIndexMode = 1,
 }
 
 public readonly struct SimulationCommand
@@ -74,6 +75,35 @@ public sealed class CommandTimeline
         return true;
     }
 
+    /// <summary>
+    /// Discards the sorted prefix that can no longer participate in rollback.
+    /// Remaining commands keep their canonical (tick, sequence) order and the
+    /// fixed backing storage is reused without managed allocation.
+    /// </summary>
+    public int DiscardBeforeTick(int minimumTickInclusive)
+    {
+        int firstRetained = 0;
+        while (firstRetained < _count &&
+            _commands[firstRetained].Tick < minimumTickInclusive)
+        {
+            firstRetained++;
+        }
+
+        if (firstRetained == 0)
+        {
+            return 0;
+        }
+
+        int retainedCount = _count - firstRetained;
+        for (int i = 0; i < retainedCount; i++)
+        {
+            _commands[i] = _commands[firstRetained + i];
+        }
+
+        _count = retainedCount;
+        return firstRetained;
+    }
+
     public void ApplyAtTick(SwarmWorld world, int tick)
     {
         for (int i = 0; i < _count; i++)
@@ -92,6 +122,10 @@ public sealed class CommandTimeline
             if (command.Type == SimulationCommandType.SetGroupTarget)
             {
                 world.SetGroupTarget(command.Group, command.Value);
+            }
+            else if (command.Type == SimulationCommandType.SetSpatialIndexMode)
+            {
+                world.SetSpatialIndexMode((SpatialIndexMode)command.Group);
             }
         }
     }
