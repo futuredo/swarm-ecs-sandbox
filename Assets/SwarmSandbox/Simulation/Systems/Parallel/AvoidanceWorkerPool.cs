@@ -1,7 +1,6 @@
 using System;
 using System.Runtime.ExceptionServices;
 using System.Threading;
-using SwarmECS.FixedPoint;
 using SwarmECS.Simulation.Avoidance;
 
 namespace SwarmECS.Simulation.Systems.Parallel
@@ -19,7 +18,7 @@ namespace SwarmECS.Simulation.Systems.Parallel
                 ? (int)requestedQueryResults
                 : capacity;
             QueryEntityIds = new int[QueryLimit];
-            QueryDistances = new FP[QueryLimit];
+            QueryDistances = new ulong[QueryLimit];
             Neighbors = new AgentNeighbor[maxNeighbors];
             Lines = new OrcaLine[maxNeighbors];
             ProjectionLines = new OrcaLine[maxNeighbors];
@@ -27,7 +26,7 @@ namespace SwarmECS.Simulation.Systems.Parallel
 
         public int[] QueryEntityIds { get; }
 
-        public FP[] QueryDistances { get; }
+        public ulong[] QueryDistances { get; }
 
         public AgentNeighbor[] Neighbors { get; }
 

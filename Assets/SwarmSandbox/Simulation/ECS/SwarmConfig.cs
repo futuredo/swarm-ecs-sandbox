@@ -7,6 +7,7 @@ public enum SpatialIndexMode : byte
 {
     UniformGrid = 0,
     KdTree = 1,
+    KdTreeKNearest = 2,
 }
 
 public readonly struct SwarmConfig

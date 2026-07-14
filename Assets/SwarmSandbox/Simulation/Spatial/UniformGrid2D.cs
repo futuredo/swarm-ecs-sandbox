@@ -19,7 +19,7 @@ namespace SwarmECS.Simulation.Spatial
         private readonly int[] _bucketStamp;
         private readonly int[] _nextEntity;
         private readonly int[] _queryEntities;
-        private readonly FP[] _queryDistances;
+        private readonly ulong[] _queryDistances;
 
         private FPVector2[] _positions;
         private int _entityCount;
@@ -60,7 +60,7 @@ namespace SwarmECS.Simulation.Spatial
             _bucketStamp = new int[bucketCount];
             _nextEntity = new int[capacity];
             _queryEntities = new int[capacity];
-            _queryDistances = new FP[capacity];
+            _queryDistances = new ulong[capacity];
         }
 
         public int Capacity => _capacity;
@@ -144,7 +144,7 @@ namespace SwarmECS.Simulation.Spatial
             FP radius,
             int maxResults,
             int[] entityScratch,
-            FP[] distanceScratch,
+            ulong[] distanceScratch,
             out int count)
         {
             if (entityScratch == null)
@@ -198,7 +198,7 @@ namespace SwarmECS.Simulation.Spatial
             FP radius,
             int[] result,
             int[] entityScratch,
-            FP[] distanceScratch,
+            ulong[] distanceScratch,
             out int count)
         {
             if (result == null)
@@ -225,45 +225,63 @@ namespace SwarmECS.Simulation.Spatial
             FP radius,
             int maxResults,
             int[] entityScratch,
-            FP[] distanceScratch,
+            ulong[] distanceScratch,
             out int count)
         {
 
-            FP radiusSquared = radius * radius;
+            ulong radiusSquared = SpatialQueryDistance.Square(radius.Raw);
             int minX = ToCellCoordinate((center.X - radius).Raw);
             int maxX = ToCellCoordinate((center.X + radius).Raw);
             int minY = ToCellCoordinate((center.Y - radius).Raw);
             int maxY = ToCellCoordinate((center.Y + radius).Raw);
             int selectedCount = 0;
 
-            for (int y = minY; y <= maxY; ++y)
+            int y = minY;
+            while (true)
             {
-                for (int x = minX; x <= maxX; ++x)
+                int x = minX;
+                while (true)
                 {
                     int slot = FindCell(x, y);
-                    if (slot < 0)
+                    if (slot >= 0)
                     {
-                        continue;
-                    }
-
-                    int entityId = _cellHead[slot];
-                    while (entityId >= 0)
-                    {
-                        FP distanceSquared = (_positions[entityId] - center).SqrMagnitude;
-                        if (distanceSquared <= radiusSquared)
+                        int entityId = _cellHead[slot];
+                        while (entityId >= 0)
                         {
-                            InsertNearestCandidate(
-                                entityId,
-                                distanceSquared,
-                                maxResults,
-                                entityScratch,
-                                distanceScratch,
-                                ref selectedCount);
-                        }
+                            ulong distanceSquared = SpatialQueryDistance.Squared(
+                                _positions[entityId],
+                                center);
+                            if (distanceSquared <= radiusSquared)
+                            {
+                                InsertNearestCandidate(
+                                    entityId,
+                                    distanceSquared,
+                                    maxResults,
+                                    entityScratch,
+                                    distanceScratch,
+                                    ref selectedCount);
+                            }
 
-                        entityId = _nextEntity[entityId];
+                            entityId = _nextEntity[entityId];
+                        }
                     }
+
+                    // Equality is checked before incrementing so int.MaxValue is
+                    // processed once and never wraps back to int.MinValue.
+                    if (x == maxX)
+                    {
+                        break;
+                    }
+
+                    ++x;
                 }
+
+                if (y == maxY)
+                {
+                    break;
+                }
+
+                ++y;
             }
 
             count = selectedCount;
@@ -271,10 +289,10 @@ namespace SwarmECS.Simulation.Spatial
 
         private static void InsertNearestCandidate(
             int entityId,
-            FP distanceSquared,
+            ulong distanceSquared,
             int maxResults,
             int[] entityScratch,
-            FP[] distanceScratch,
+            ulong[] distanceScratch,
             ref int selectedCount)
         {
             int insertion;
@@ -312,9 +330,9 @@ namespace SwarmECS.Simulation.Spatial
         }
 
         private static bool ComesBefore(
-            FP leftDistance,
+            ulong leftDistance,
             int leftEntity,
-            FP rightDistance,
+            ulong rightDistance,
             int rightEntity)
         {
             return leftDistance < rightDistance ||

@@ -7,6 +7,8 @@
 [Uu]ser[Ss]ettings/
 [Mm]emoryCaptures/
 [Rr]ecordings/
+[Tt]est[Rr]esults/
+BenchmarkResults/*.log
 .vs/
 .vscode/
 .idea/

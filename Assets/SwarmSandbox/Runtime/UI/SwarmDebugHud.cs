@@ -55,14 +55,14 @@ namespace SwarmECS.Runtime
                 _host.QueueCatchUp();
             }
 
-            if (GUI.Button(new Rect(292f, y, 82f, 28f), "GRID / KD"))
+            if (GUI.Button(new Rect(292f, y, 82f, 28f), "QUERY MODE"))
             {
                 _host.ToggleSpatialIndex();
             }
 
             GUI.Label(
                 new Rect(30f, panel.yMax - 42f, panelWidth - 30f, 24f),
-                "SPACE pause | L rollback | T catch-up | K index | R reset | WASD move",
+                "SPACE pause | L rollback | T catch-up | K Grid/KD-radius/KNN | R reset",
                 _goodStyle);
         }
 
@@ -84,11 +84,19 @@ namespace SwarmECS.Runtime
             _builder.Append("    GPU draw  1 indirect batch\n\n");
 
             _builder.Append("SPATIAL + AVOIDANCE\n");
-            _builder.Append("Index        ").Append(_host.Simulation.Avoidance.Mode == SpatialIndexMode.UniformGrid ? "Uniform Grid (O(N+k))" : "KD-Tree (KNN/radius)").Append('\n');
+            _builder.Append("Neighbor     ").Append(GetNeighborModeLabel(_host.World.SpatialIndexMode)).Append('\n');
             _builder.Append("Neighbors    ").Append(_host.Simulation.Avoidance.LastNeighborLinks.ToString("N0"));
             _builder.Append("    ORCA lines ").Append(_host.Simulation.Avoidance.LastOrcaLines.ToString("N0")).Append('\n');
             _builder.Append("SAT contacts ").Append(_host.Simulation.Obstacles.LastContactCount.ToString("N0"));
-            _builder.Append("    A* shared waypoints ").Append(_host.Simulation.Navigation.TotalSharedWaypoints).Append("\n\n");
+            _builder.Append("    A* shared waypoints ").Append(_host.Simulation.Navigation.TotalSharedWaypoints).Append('\n');
+            _builder.Append("Path req     ").Append(_host.Simulation.Navigation.LastProcessedPathRequests);
+            _builder.Append('/').Append(_host.Simulation.Navigation.MaxPathRequestsPerTick);
+            _builder.Append("    pending ").Append(_host.Simulation.Navigation.PendingPathRequests).Append('\n');
+            _builder.Append("Path cache   ").Append(_host.Simulation.Navigation.CacheHits).Append(" hit / ");
+            _builder.Append(_host.Simulation.Navigation.CacheMisses).Append(" miss");
+            _builder.Append("    replay A* ").Append(_host.Simulation.Navigation.DerivedAStarRebuilds).Append('\n');
+            _builder.Append("Nav islands  ").Append(_host.Simulation.Navigation.Islands.RegionCount);
+            _builder.Append("    rejected ").Append(_host.Simulation.Navigation.IslandRejectedRequests).Append("\n\n");
 
             _builder.Append("DETERMINISTIC NETCODE LAB\n");
             _builder.Append("Twin-world   ").Append(_host.DeterminismProbePassed ? "PASS (raw state identical)" : "FAIL").Append('\n');
@@ -99,9 +107,20 @@ namespace SwarmECS.Runtime
             _builder.Append("    catch-up backlog ").Append(_host.CatchUpBacklog).Append("\n\n");
 
             _builder.Append("PIPELINE\n");
-            _builder.Append("Shared A* → Grid/KD query → RVO2 ORCA LP\n");
+            _builder.Append("Budgeted shared A* → Grid/KD query → RVO2 ORCA LP\n");
             _builder.Append("→ fixed-point integrate → SAT resolve → GPU upload");
             _cachedMetrics = _builder.ToString();
+        }
+
+        private static string GetNeighborModeLabel(SpatialIndexMode mode)
+        {
+            return mode switch
+            {
+                SpatialIndexMode.UniformGrid => "Uniform Grid radius (bounded top-K)",
+                SpatialIndexMode.KdTree => "KD-Tree radius (branch-pruned)",
+                SpatialIndexMode.KdTreeKNearest => "KD-Tree exact KNN (bounded K)",
+                _ => "Unknown",
+            };
         }
 
         private void EnsureStyles()

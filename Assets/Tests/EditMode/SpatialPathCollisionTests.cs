@@ -60,6 +60,83 @@ namespace SwarmECS.Tests
         }
 
         [Test]
+        public void RadiusQueries_RejectDiagonalPointOutsideOneRawUnitAndUseExactOrdering()
+        {
+            FPVector2[] positions =
+            {
+                RawPoint(1, 1),
+                RawPoint(1, 0),
+                RawPoint(0, 1),
+                RawPoint(0, 0),
+            };
+            FP radius = FP.Epsilon;
+            int[] gridResults = new int[positions.Length];
+            int[] kdResults = new int[positions.Length];
+
+            var grid = new UniformGrid2D(positions.Length, FP.One);
+            grid.Build(positions, positions.Length);
+            grid.QueryRadius(FPVector2.Zero, radius, gridResults, out int gridCount);
+
+            var tree = new DataOrientedKdTree2D(positions.Length);
+            tree.Build(positions, positions.Length);
+            tree.QueryRadius(FPVector2.Zero, radius, kdResults, out int kdCount);
+
+            Assert.That(gridCount, Is.EqualTo(3));
+            Assert.That(kdCount, Is.EqualTo(gridCount));
+            Assert.That(
+                Slice(gridResults, gridCount),
+                Is.EqualTo(new[] { 3, 1, 2 }),
+                "The diagonal point is sqrt(2) raw units away and must be excluded.");
+            Assert.That(Slice(kdResults, kdCount), Is.EqualTo(Slice(gridResults, gridCount)));
+        }
+
+        [Test]
+        public void UniformGridRadius_BoundedTopKMatchesKdTreeRawDistanceOrdering()
+        {
+            FPVector2[] positions =
+            {
+                RawPoint(3, 4),
+                RawPoint(2, 0),
+                RawPoint(0, 0),
+                RawPoint(-1, -1),
+                RawPoint(1, 1),
+                RawPoint(0, -2),
+                RawPoint(4, 4),
+            };
+            FP radius = FP.FromRaw(5);
+            int[] gridResults = new int[3];
+            int[] kdResults = new int[3];
+
+            var grid = new UniformGrid2D(positions.Length, FP.One);
+            grid.Build(positions, positions.Length);
+            grid.QueryRadius(FPVector2.Zero, radius, gridResults, out int gridCount);
+
+            var tree = new DataOrientedKdTree2D(positions.Length);
+            tree.Build(positions, positions.Length);
+            tree.QueryRadius(FPVector2.Zero, radius, kdResults, out int kdCount);
+
+            Assert.That(gridCount, Is.EqualTo(3));
+            Assert.That(kdCount, Is.EqualTo(gridCount));
+            Assert.That(gridResults, Is.EqualTo(new[] { 2, 3, 4 }));
+            Assert.That(kdResults, Is.EqualTo(gridResults));
+        }
+
+        [Test, Timeout(1000)]
+        public void UniformGridRadius_AtMaxRawCellCoordinate_DoesNotWrapLoopCounters()
+        {
+            FPVector2 maxPoint = new FPVector2(FP.MaxValue, FP.MaxValue);
+            FPVector2[] positions = { maxPoint };
+            var grid = new UniformGrid2D(1, FP.Epsilon);
+            grid.Build(positions, positions.Length);
+            int[] result = new int[1];
+
+            grid.QueryRadius(maxPoint, FP.Zero, result, out int count);
+
+            Assert.That(count, Is.EqualTo(1));
+            Assert.That(result[0], Is.Zero);
+        }
+
+        [Test]
         public void KdTreeRadius_MatchesBruteForceAcrossDeterministicPointCloud()
         {
             const int pointCount = 97;
@@ -109,6 +186,71 @@ namespace SwarmECS.Tests
 
             Assert.That(count, Is.EqualTo(3));
             Assert.That(nearest, Is.EqualTo(new[] { 0, 1, 2 }));
+        }
+
+        [Test]
+        public void KdTreeKNearest_UsesWideDistanceWithoutFixedPointSquareSaturation()
+        {
+            FPVector2[] positions =
+            {
+                Point(0, 0),
+                Point(800, 0),
+                Point(1000, 0),
+            };
+            var tree = new DataOrientedKdTree2D(positions.Length);
+            tree.Build(positions, positions.Length);
+            int[] nearest = new int[2];
+
+            tree.QueryKNearest(positions[2], 2, nearest, out int count);
+
+            Assert.That(count, Is.EqualTo(2));
+            Assert.That(nearest, Is.EqualTo(new[] { 2, 1 }));
+        }
+
+        [Test]
+        public void KdTreeKNearest_OrdersDistinctDistancesAcrossFullTwoAxisRawDomain()
+        {
+            FPVector2 center = new FPVector2(FP.MinValue, FP.MinValue);
+            FPVector2[] positions =
+            {
+                new FPVector2(FP.MaxValue, FP.MaxValue),
+                new FPVector2(FP.MaxValue, FP.FromRaw(int.MaxValue - 1)),
+                new FPVector2(FP.MaxValue, FP.MinValue),
+            };
+            var tree = new DataOrientedKdTree2D(positions.Length);
+            tree.Build(positions, positions.Length);
+            int[] nearest = new int[positions.Length];
+
+            tree.QueryKNearest(center, positions.Length, nearest, out int count);
+
+            Assert.That(count, Is.EqualTo(positions.Length));
+            Assert.That(
+                nearest,
+                Is.EqualTo(new[] { 2, 1, 0 }),
+                "The 65-bit distance must preserve the real order beyond ulong rather than tie by id.");
+        }
+
+        [Test]
+        public void KdTreeKNearest_WideWorstDistanceDoesNotIncorrectlyPruneFarBranch()
+        {
+            FPVector2 center = new FPVector2(FP.MinValue, FP.MinValue);
+            FPVector2[] positions =
+            {
+                new FPVector2(FP.FromRaw(int.MaxValue - 2), FP.MaxValue),
+                new FPVector2(FP.FromRaw(int.MaxValue - 1), FP.MaxValue),
+                new FPVector2(FP.MaxValue, FP.MinValue),
+            };
+            var tree = new DataOrientedKdTree2D(positions.Length);
+            tree.Build(positions, positions.Length);
+            int[] nearest = new int[1];
+
+            tree.QueryKNearest(center, 1, nearest, out int count);
+
+            Assert.That(count, Is.EqualTo(1));
+            Assert.That(
+                nearest[0],
+                Is.EqualTo(2),
+                "A high-bit worst distance must not be compared using only its wrapped low bits.");
         }
 
         [Test]
@@ -223,13 +365,18 @@ namespace SwarmECS.Tests
             return new FPVector2(FP.FromInt(x), FP.FromInt(y));
         }
 
+        private static FPVector2 RawPoint(int x, int y)
+        {
+            return new FPVector2(FP.FromRaw(x), FP.FromRaw(y));
+        }
+
         private static List<int> BruteForceRadius(FPVector2[] positions, FPVector2 center, FP radius)
         {
-            FP radiusSquared = radius * radius;
+            ulong radiusSquared = SquareRaw(radius.Raw);
             var result = new List<int>();
             for (int i = 0; i < positions.Length; ++i)
             {
-                if ((positions[i] - center).SqrMagnitude <= radiusSquared)
+                if (RawDistanceSquared(positions[i], center) <= radiusSquared)
                 {
                     result.Add(i);
                 }
@@ -237,12 +384,40 @@ namespace SwarmECS.Tests
 
             result.Sort((left, right) =>
             {
-                FP leftDistance = (positions[left] - center).SqrMagnitude;
-                FP rightDistance = (positions[right] - center).SqrMagnitude;
+                ulong leftDistance = RawDistanceSquared(positions[left], center);
+                ulong rightDistance = RawDistanceSquared(positions[right], center);
                 int distanceComparison = leftDistance.CompareTo(rightDistance);
                 return distanceComparison != 0 ? distanceComparison : left.CompareTo(right);
             });
             return result;
+        }
+
+        private static int[] Slice(int[] values, int count)
+        {
+            var result = new int[count];
+            System.Array.Copy(values, result, count);
+            return result;
+        }
+
+        private static ulong RawDistanceSquared(FPVector2 left, FPVector2 right)
+        {
+            long deltaX = (long)left.X.Raw - right.X.Raw;
+            long deltaY = (long)left.Y.Raw - right.Y.Raw;
+            ulong xSquared = SquareRaw(deltaX);
+            ulong ySquared = SquareRaw(deltaY);
+            return ulong.MaxValue - xSquared < ySquared
+                ? ulong.MaxValue
+                : xSquared + ySquared;
+        }
+
+        private static ulong SquareRaw(long value)
+        {
+            ulong magnitude = value < 0L
+                ? (ulong)(-(value + 1L)) + 1UL
+                : (ulong)value;
+            return magnitude > uint.MaxValue
+                ? ulong.MaxValue
+                : magnitude * magnitude;
         }
     }
 }

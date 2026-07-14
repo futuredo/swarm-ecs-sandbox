@@ -1,4 +1,6 @@
+using System;
 using SwarmECS.FixedPoint;
+using SwarmECS.Simulation.Pathfinding;
 
 namespace SwarmECS.Simulation.Netcode
 {
@@ -19,9 +21,22 @@ public sealed class WorldSnapshotRing
     private readonly ushort[] _pathCursors;
     private readonly int[] _groupTargetX;
     private readonly int[] _groupTargetY;
+    private readonly GroupPathState[] _groupPathStates;
+    private readonly int[] _nextPathRequestSequences;
+    private readonly byte[] _spatialIndexModes;
 
     public WorldSnapshotRing(int agentCapacity, int historyLength)
     {
+        if (agentCapacity <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(agentCapacity));
+        }
+
+        if (historyLength <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(historyLength));
+        }
+
         _agentCapacity = agentCapacity;
         _historyLength = historyLength;
         _ticks = new int[historyLength];
@@ -33,6 +48,9 @@ public sealed class WorldSnapshotRing
         _pathCursors = new ushort[agentCapacity * historyLength];
         _groupTargetX = new int[SwarmWorld.GroupCount * historyLength];
         _groupTargetY = new int[SwarmWorld.GroupCount * historyLength];
+        _groupPathStates = new GroupPathState[SwarmWorld.GroupCount * historyLength];
+        _nextPathRequestSequences = new int[historyLength];
+        _spatialIndexModes = new byte[historyLength];
 
         for (int i = 0; i < _ticks.Length; i++)
         {
@@ -42,6 +60,17 @@ public sealed class WorldSnapshotRing
 
     public int HistoryLength => _historyLength;
 
+    public bool Contains(SwarmWorld world, int tick)
+    {
+        if (world == null)
+        {
+            return false;
+        }
+
+        int slot = PositiveModulo(tick, _historyLength);
+        return _ticks[slot] == tick && _counts[slot] == world.Count;
+    }
+
     public void Save(SwarmWorld world)
     {
         int slot = PositiveModulo(world.Tick, _historyLength);
@@ -49,6 +78,8 @@ public sealed class WorldSnapshotRing
         int targetOffset = slot * SwarmWorld.GroupCount;
         _ticks[slot] = world.Tick;
         _counts[slot] = world.Count;
+        _nextPathRequestSequences[slot] = world.NextPathRequestSequence;
+        _spatialIndexModes[slot] = (byte)world.SpatialIndexMode;
 
         for (int i = 0; i < world.Count; i++)
         {
@@ -63,13 +94,14 @@ public sealed class WorldSnapshotRing
         {
             _groupTargetX[targetOffset + i] = world.GroupTargets[i].X.Raw;
             _groupTargetY[targetOffset + i] = world.GroupTargets[i].Y.Raw;
+            _groupPathStates[targetOffset + i] = world.GroupPathStates[i];
         }
     }
 
     public bool TryRestore(SwarmWorld world, int tick)
     {
         int slot = PositiveModulo(tick, _historyLength);
-        if (_ticks[slot] != tick || _counts[slot] != world.Count)
+        if (!Contains(world, tick))
         {
             return false;
         }
@@ -92,8 +124,11 @@ public sealed class WorldSnapshotRing
             world.GroupTargets[i] = new FPVector2(
                 FP.FromRaw(_groupTargetX[targetOffset + i]),
                 FP.FromRaw(_groupTargetY[targetOffset + i]));
+            world.GroupPathStates[i] = _groupPathStates[targetOffset + i];
         }
 
+        world.NextPathRequestSequence = _nextPathRequestSequences[slot];
+        world.SpatialIndexMode = (SpatialIndexMode)_spatialIndexModes[slot];
         world.Tick = tick;
         return true;
     }
