@@ -10,12 +10,16 @@ namespace SwarmECS.Runtime
     /// </summary>
     public sealed class SwarmAutomatedCapture : MonoBehaviour
     {
-        private const int CaptureTick = 45;
+        private const int ConfigureTick = 45;
+        private const int DefaultCaptureTick = 60;
+        private const int ObstacleInteractionCaptureTick = 240;
         private const float QuitDelaySeconds = 2f;
 
         private SwarmSimulationHost _host;
+        private SwarmLabView _requestedView;
         private string _capturePath;
         private float _captureTime;
+        private bool _viewConfigured;
         private bool _captureRequested;
         private bool _captureCompleted;
 
@@ -32,12 +36,23 @@ namespace SwarmECS.Runtime
             DontDestroyOnLoad(gameObject);
             SwarmAutomatedCapture capture = gameObject.AddComponent<SwarmAutomatedCapture>();
             capture._capturePath = Path.GetFullPath(path);
+            capture._requestedView = ReadLabViewArgument();
         }
 
         private void Update()
         {
             _host ??= FindFirstObjectByType<SwarmSimulationHost>();
-            if (_host == null || _host.SimulationTick < CaptureTick)
+            if (_host == null)
+            {
+                return;
+            }
+
+            if (!_viewConfigured && _host.SimulationTick >= ConfigureTick)
+            {
+                ConfigureRequestedView();
+            }
+
+            if (!_viewConfigured || _host.SimulationTick < CaptureTickForView(_requestedView))
             {
                 return;
             }
@@ -49,15 +64,45 @@ namespace SwarmECS.Runtime
                 return;
             }
 
-            if (_captureCompleted && Time.realtimeSinceStartup - _captureTime >= QuitDelaySeconds)
+            if (_captureCompleted && File.Exists(_capturePath) &&
+                Time.realtimeSinceStartup - _captureTime >= QuitDelaySeconds)
             {
                 Debug.Log("[SwarmECS] Player capture completed.");
                 Application.Quit(0);
             }
         }
 
+        private void ConfigureRequestedView()
+        {
+            SwarmDebugHud hud = FindFirstObjectByType<SwarmDebugHud>();
+            if (hud == null)
+            {
+                return;
+            }
+
+            hud.SetActiveView(_requestedView);
+            switch (_requestedView)
+            {
+                case SwarmLabView.Navigation:
+                    _host.QueueBlockedNavigationProbe();
+                    break;
+                case SwarmLabView.Rollback:
+                    _host.InjectLateCorrection();
+                    break;
+            }
+
+            _viewConfigured = true;
+            Debug.Log($"[SwarmECS] Capture view configured: {_requestedView}");
+        }
+
         private IEnumerator CaptureAtEndOfFrame()
         {
+            // Metal can defer the final IMGUI/GL submission beyond the frame in
+            // which the view is switched. Give the selected lab several complete
+            // presentation frames, then use Unity's screenshot path so the GPU
+            // back buffer is synchronized before encoding.
+            yield return null;
+            yield return null;
             yield return new WaitForEndOfFrame();
 
             string directory = Path.GetDirectoryName(_capturePath);
@@ -66,14 +111,12 @@ namespace SwarmECS.Runtime
                 Directory.CreateDirectory(directory);
             }
 
-            Texture2D screenshot = new(Screen.width, Screen.height, TextureFormat.RGB24, false)
+            if (File.Exists(_capturePath))
             {
-                name = "Swarm Automated Capture",
-            };
-            screenshot.ReadPixels(new Rect(0f, 0f, Screen.width, Screen.height), 0, 0, false);
-            screenshot.Apply(false, false);
-            File.WriteAllBytes(_capturePath, screenshot.EncodeToPNG());
-            Destroy(screenshot);
+                File.Delete(_capturePath);
+            }
+
+            ScreenCapture.CaptureScreenshot(_capturePath, 1);
 
             _captureTime = Time.realtimeSinceStartup;
             _captureCompleted = true;
@@ -92,6 +135,22 @@ namespace SwarmECS.Runtime
             }
 
             return null;
+        }
+
+        private static SwarmLabView ReadLabViewArgument()
+        {
+            string value = ReadArgument("-swarmCaptureView");
+            return Enum.TryParse(value, true, out SwarmLabView view) &&
+                (uint)view <= (uint)SwarmLabView.Rollback
+                ? view
+                : SwarmLabView.Overview;
+        }
+
+        private static int CaptureTickForView(SwarmLabView view)
+        {
+            return view == SwarmLabView.Avoidance || view == SwarmLabView.Collision
+                ? ObstacleInteractionCaptureTick
+                : DefaultCaptureTick;
         }
     }
 }

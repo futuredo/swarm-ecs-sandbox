@@ -54,6 +54,7 @@ public sealed class MovementIntegrationSystem
             else
             {
                 staticObstacles.MoveAgent(
+                    i,
                     world.Positions[i],
                     velocity,
                     world.Radii[i],

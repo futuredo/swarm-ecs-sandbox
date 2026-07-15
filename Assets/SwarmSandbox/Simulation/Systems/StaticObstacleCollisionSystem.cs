@@ -8,6 +8,49 @@ namespace SwarmECS.Simulation.Systems
 {
 
 /// <summary>
+/// Non-authoritative contact evidence retained for presentation and diagnostics.
+/// It is deliberately excluded from snapshots, hashes and replay payloads.
+/// </summary>
+public readonly struct SweepContactDiagnostic
+{
+    public SweepContactDiagnostic(
+        int agentId,
+        int obstacleId,
+        int featureId,
+        FPVector2 start,
+        FPVector2 requestedEnd,
+        FPVector2 impact,
+        FPVector2 normal,
+        FP fraction)
+    {
+        AgentId = agentId;
+        ObstacleId = obstacleId;
+        FeatureId = featureId;
+        Start = start;
+        RequestedEnd = requestedEnd;
+        Impact = impact;
+        Normal = normal;
+        Fraction = fraction;
+    }
+
+    public int AgentId { get; }
+
+    public int ObstacleId { get; }
+
+    public int FeatureId { get; }
+
+    public FPVector2 Start { get; }
+
+    public FPVector2 RequestedEnd { get; }
+
+    public FPVector2 Impact { get; }
+
+    public FPVector2 Normal { get; }
+
+    public FP Fraction { get; }
+}
+
+/// <summary>
 /// Immutable static-obstacle data plus allocation-free continuous collision queries.
 /// The broadphase and segment topology are snapshots of <see cref="Obstacles"/> at
 /// construction time; changing obstacle topology requires constructing a new system
@@ -17,11 +60,14 @@ public sealed class StaticObstacleCollisionSystem
 {
     public const int MaxSweepIterations = 4;
     public const int MaxPenetrationPasses = 4;
+    public const int SweepDiagnosticCapacity = 64;
 
     private static readonly FP SweepSkin = FP.FromRaw(4);
     private readonly FPOrientedBox2[] _obstacles;
     private readonly ObstacleSegment[] _obstacleSegments;
     private readonly StaticObstacleQueryScratch _queryScratch;
+    private readonly SweepContactDiagnostic[] _lastSweepDiagnostics =
+        new SweepContactDiagnostic[SweepDiagnosticCapacity];
 
     public StaticObstacleCollisionSystem()
         : this(CreateDefaultObstacles())
@@ -80,6 +126,20 @@ public sealed class StaticObstacleCollisionSystem
 
     public FP LastMaxResidualDepth { get; private set; }
 
+    public int LastSweepDiagnosticCount { get; private set; }
+
+    public bool TryGetLastSweepDiagnostic(int index, out SweepContactDiagnostic diagnostic)
+    {
+        if ((uint)index >= (uint)LastSweepDiagnosticCount)
+        {
+            diagnostic = default;
+            return false;
+        }
+
+        diagnostic = _lastSweepDiagnostics[index];
+        return true;
+    }
+
     public void BeginTick()
     {
         LastBroadphaseCandidates = 0;
@@ -87,6 +147,7 @@ public sealed class StaticObstacleCollisionSystem
         LastSweepHits = 0;
         LastPenetrationRecoveries = 0;
         LastMaxResidualDepth = FP.Zero;
+        LastSweepDiagnosticCount = 0;
     }
 
     /// <summary>
@@ -95,6 +156,29 @@ public sealed class StaticObstacleCollisionSystem
     /// the sweep to recover exceptional pre-existing or rounding penetration.
     /// </summary>
     public void MoveAgent(
+        FPVector2 startPosition,
+        FPVector2 requestedVelocity,
+        FP radius,
+        FP deltaTime,
+        out FPVector2 finalPosition,
+        out FPVector2 finalVelocity)
+    {
+        MoveAgent(
+            -1,
+            startPosition,
+            requestedVelocity,
+            radius,
+            deltaTime,
+            out finalPosition,
+            out finalVelocity);
+    }
+
+    /// <summary>
+    /// Agent-aware overload used by the ECS integration path. The stable id is only
+    /// copied into presentation diagnostics and never influences collision ordering.
+    /// </summary>
+    public void MoveAgent(
+        int agentId,
         FPVector2 startPosition,
         FPVector2 requestedVelocity,
         FP radius,
@@ -160,8 +244,19 @@ public sealed class StaticObstacleCollisionSystem
                 break;
             }
 
+            FPVector2 requestedEnd = position + remaining;
+            FPVector2 impact = position + (remaining * earliest.Fraction);
+            RecordSweepDiagnostic(
+                agentId,
+                earliestObstacleId,
+                earliest.FeatureId,
+                position,
+                requestedEnd,
+                impact,
+                earliest.Normal,
+                earliest.Fraction);
             LastSweepHits++;
-            position += remaining * earliest.Fraction;
+            position = impact;
 
             FP remainingFraction = FP.One - earliest.Fraction;
             FPVector2 slidRemaining = remaining * remainingFraction;
@@ -199,6 +294,32 @@ public sealed class StaticObstacleCollisionSystem
 
         finalPosition = position;
         finalVelocity = velocity;
+    }
+
+    private void RecordSweepDiagnostic(
+        int agentId,
+        int obstacleId,
+        int featureId,
+        FPVector2 start,
+        FPVector2 requestedEnd,
+        FPVector2 impact,
+        FPVector2 normal,
+        FP fraction)
+    {
+        if (LastSweepDiagnosticCount >= _lastSweepDiagnostics.Length)
+        {
+            return;
+        }
+
+        _lastSweepDiagnostics[LastSweepDiagnosticCount++] = new SweepContactDiagnostic(
+            agentId,
+            obstacleId,
+            featureId,
+            start,
+            requestedEnd,
+            impact,
+            normal,
+            fraction);
     }
 
     /// <summary>

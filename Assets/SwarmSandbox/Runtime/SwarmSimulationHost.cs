@@ -15,6 +15,7 @@ namespace SwarmECS.Runtime
     {
         private const int FixedRate = 30;
         private const float FixedSeconds = 1f / FixedRate;
+        private const int RollbackGhostCapacity = 48;
 
         [SerializeField, Range(100, 10_000)] private int agentCount = 10_000;
         [SerializeField] private uint deterministicSeed = 0x5EED1234u;
@@ -37,6 +38,14 @@ namespace SwarmECS.Runtime
         private int _renderFrameCount;
         private float _fpsWindowStart;
         private float _measuredFps;
+        private readonly int[] _rollbackGhostEntityIds = new int[RollbackGhostCapacity];
+        private readonly FPVector2[] _rollbackGhostBefore = new FPVector2[RollbackGhostCapacity];
+        private readonly FPVector2[] _rollbackGhostAfter = new FPVector2[RollbackGhostCapacity];
+        private int _rollbackGhostCount;
+        private int _rollbackGhostOriginTick;
+        private int _rollbackGhostDestinationTick;
+        private int _rollbackGhostGroup = -1;
+        private int _worldEpoch;
 
         public SwarmWorld World => _world;
 
@@ -66,6 +75,16 @@ namespace SwarmECS.Runtime
 
         public float MeasuredFps => _measuredFps;
 
+        public int WorldEpoch => _worldEpoch;
+
+        public int RollbackGhostCount => _rollbackGhostCount;
+
+        public int RollbackGhostOriginTick => _rollbackGhostOriginTick;
+
+        public int RollbackGhostDestinationTick => _rollbackGhostDestinationTick;
+
+        public int RollbackGhostGroup => _rollbackGhostGroup;
+
         private void Awake()
         {
             QualitySettings.vSyncCount = 0;
@@ -75,6 +94,11 @@ namespace SwarmECS.Runtime
             if (GetComponent<SwarmDebugHud>() == null)
             {
                 gameObject.AddComponent<SwarmDebugHud>();
+            }
+
+            if (GetComponent<SwarmTechnicalOverlayRenderer>() == null)
+            {
+                gameObject.AddComponent<SwarmTechnicalOverlayRenderer>();
             }
         }
 
@@ -185,13 +209,62 @@ namespace SwarmECS.Runtime
                 new(FP.FromInt(-62), FP.FromInt(20)),
                 new(FP.FromInt(20), FP.FromInt(-62)),
             };
+            int destinationTick = _world.Tick;
+            int originTick = destinationTick - simulatedLatencyTicks;
+            CaptureRollbackGhostBefore(group, originTick, destinationTick);
             // Local visualization only: a real network path must pass the server's complete
             // SimulationCommand (including its original tick/sequence) to InjectLateCommand.
-            _rollback.InjectLocallyGeneratedLateGroupTarget(
+            bool applied = _rollback.InjectLocallyGeneratedLateGroupTarget(
                 simulatedLatencyTicks,
                 group,
                 targets[group]);
+            if (applied)
+            {
+                CaptureRollbackGhostAfter();
+            }
+            else
+            {
+                _rollbackGhostCount = 0;
+                _rollbackGhostGroup = -1;
+            }
+
             _currentHash = _world.ComputeStateHash();
+        }
+
+        public bool QueueBlockedNavigationProbe()
+        {
+            if (_world == null || _rollback == null)
+            {
+                return false;
+            }
+
+            SimulationCommand blockedTarget = new(
+                _world.Tick,
+                _rollback.NextLocallyGeneratedSequence,
+                SimulationCommandType.SetGroupTarget,
+                0,
+                FPVector2.Zero);
+            return _rollback.QueueCommand(blockedTarget);
+        }
+
+        public bool TryGetRollbackGhost(
+            int index,
+            out int entityId,
+            out FPVector2 before,
+            out FPVector2 after)
+        {
+            if ((uint)index >= (uint)_rollbackGhostCount)
+            {
+                entityId = -1;
+                before = FPVector2.Zero;
+                after = FPVector2.Zero;
+                return false;
+            }
+
+            entityId = _rollbackGhostEntityIds[index];
+            before = _rollbackGhostBefore[index];
+            after = _rollbackGhostAfter[index];
+            return true;
         }
 
         public void SetAgentCount(int count)
@@ -218,6 +291,52 @@ namespace SwarmECS.Runtime
             _lastAllocatedBytes = 0;
             _currentHash = _world.ComputeStateHash();
             _paused = false;
+            _rollbackGhostCount = 0;
+            _rollbackGhostOriginTick = 0;
+            _rollbackGhostDestinationTick = 0;
+            _rollbackGhostGroup = -1;
+            unchecked
+            {
+                _worldEpoch++;
+            }
+        }
+
+        private void CaptureRollbackGhostBefore(int group, int originTick, int destinationTick)
+        {
+            int memberCount = 0;
+            for (int entityId = group; entityId < _world.Count; entityId += SwarmWorld.GroupCount)
+            {
+                if (_world.Groups[entityId] == group)
+                {
+                    memberCount++;
+                }
+            }
+
+            int sampleCount = Mathf.Min(RollbackGhostCapacity, memberCount);
+            _rollbackGhostCount = sampleCount;
+            _rollbackGhostOriginTick = originTick;
+            _rollbackGhostDestinationTick = destinationTick;
+            _rollbackGhostGroup = group;
+            for (int sample = 0; sample < sampleCount; sample++)
+            {
+                int rank = (int)(((long)sample * memberCount) / sampleCount);
+                int entityId = group + (rank * SwarmWorld.GroupCount);
+                _rollbackGhostEntityIds[sample] = entityId;
+                _rollbackGhostBefore[sample] = _world.Positions[entityId];
+                _rollbackGhostAfter[sample] = _world.Positions[entityId];
+            }
+        }
+
+        private void CaptureRollbackGhostAfter()
+        {
+            for (int sample = 0; sample < _rollbackGhostCount; sample++)
+            {
+                int entityId = _rollbackGhostEntityIds[sample];
+                if ((uint)entityId < (uint)_world.Count)
+                {
+                    _rollbackGhostAfter[sample] = _world.Positions[entityId];
+                }
+            }
         }
 
         private void StepMeasured()

@@ -1,14 +1,14 @@
-# v0.3.0 release checklist
+# v0.3.1 release checklist
 
 This checklist binds source, tests, benchmarks, replay output and Player artifacts to one immutable commit. Unity tests and Player builds may run on a locally activated Unity 6000.3.9f1 installation; the default hosted workflow performs static validation only.
 
 ## 1. Freeze scope and source identity
 
-- [ ] Confirm every `git status --short` entry belongs to v0.3.0.
+- [ ] Confirm every `git status --short` entry belongs to v0.3.1.
 - [ ] Confirm every new Unity asset has its matching `.meta` file.
 - [ ] Reject generated `Library`, `Temp`, `Obj`, `Builds`, `Logs`, `UserSettings`, `TestResults`, HybridCLR local data and private credentials.
 - [ ] Confirm `ProjectSettings/ProjectVersion.txt` records Unity 6000.3.9f1 and package dependencies remain pinned.
-- [ ] Confirm `bundleVersion` and release documentation use `0.3.0`.
+- [ ] Confirm `bundleVersion` and release documentation use `0.3.1`.
 - [ ] Record `git rev-parse HEAD`; rerun every artifact-producing step after any source change.
 
 ## 2. Static validation
@@ -100,6 +100,8 @@ SWARM_AGENT_COUNT=10000 SWARM_WARMUP_TICKS=8 SWARM_SAMPLE_TICKS=32 \
 
 - [ ] Build the intended macOS architecture/backend from the frozen commit and record Development Build state.
 - [ ] Launch the target scene and exercise spatial-mode switching, late-command rollback, catch-up and obstacle interaction.
+- [ ] Capture Overview, Navigation, Avoidance, Collision and Rollback views from the built Player and inspect every image at full resolution.
+- [ ] Confirm navigation rejection, sampled ORCA constraints, BVH/CCD probe and rollback correction are labelled as authoritative experiment versus presentation-only diagnostics.
 - [ ] Run 5–10 minutes; inspect Player log for repeated exceptions or abnormal exit.
 - [ ] Archive the Player and generate SHA-256.
 - [ ] Record Mach-O architectures and signing/notarization state exactly.
@@ -119,8 +121,8 @@ SWARM_AGENT_COUNT=10000 SWARM_WARMUP_TICKS=8 SWARM_SAMPLE_TICKS=32 \
 
 ## 8. GitHub Release
 
-- [ ] Create annotated tag `v0.3.0` at the frozen commit.
-- [ ] Use [`RELEASE_NOTES_v0.3.0.md`](RELEASE_NOTES_v0.3.0.md) as the release-note base and add the final commit/test/environment values.
+- [ ] Create annotated tag `v0.3.1` at the frozen commit.
+- [ ] Use [`RELEASE_NOTES_v0.3.1.md`](RELEASE_NOTES_v0.3.1.md) as the release-note base and add the final commit/test/environment values.
 - [ ] Upload the scrubbed test summary, benchmark JSON/Markdown, replay/input/output, Player archive/screenshot and checksum.
 - [ ] Scan every attachment for user names, absolute local paths, host names, private IPs, credentials and build-machine metadata.
 - [ ] Clone the tag into a clean directory and repeat the documented static checks plus at least one runnable verification path.

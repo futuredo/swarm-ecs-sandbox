@@ -270,6 +270,49 @@ namespace SwarmECS.Tests.EditMode
         }
 
         [Test]
+        public void BvhDiagnostics_ExposeEveryImmutableNodeAndRejectInvalidIndices()
+        {
+            FPOrientedBox2[] obstacles =
+            {
+                new FPOrientedBox2(V(-4, 0), V(1, 2)),
+                new FPOrientedBox2(FPVector2.Zero, V(1, 1)),
+                new FPOrientedBox2(V(4, 0), V(1, 2)),
+            };
+            var bvh = new StaticObstacleBvh2D(obstacles);
+            int leafCount = 0;
+
+            for (int node = 0; node < bvh.NodeCount; node++)
+            {
+                Assert.That(
+                    bvh.TryGetNodeDiagnostic(
+                        node,
+                        out FPAabb2 bounds,
+                        out int left,
+                        out int right,
+                        out int obstacleId),
+                    Is.True);
+                Assert.That(bounds.Min.X, Is.LessThanOrEqualTo(bounds.Max.X));
+                Assert.That(bounds.Min.Y, Is.LessThanOrEqualTo(bounds.Max.Y));
+                if (obstacleId >= 0)
+                {
+                    leafCount++;
+                    Assert.That(left, Is.EqualTo(-1));
+                    Assert.That(right, Is.EqualTo(-1));
+                    Assert.That(bounds, Is.EqualTo(bvh.GetObstacleBounds(obstacleId)));
+                }
+                else
+                {
+                    Assert.That(left, Is.GreaterThanOrEqualTo(0));
+                    Assert.That(right, Is.GreaterThanOrEqualTo(0));
+                }
+            }
+
+            Assert.That(leafCount, Is.EqualTo(obstacles.Length));
+            Assert.That(bvh.TryGetNodeDiagnostic(-1, out _, out _, out _, out _), Is.False);
+            Assert.That(bvh.TryGetNodeDiagnostic(bvh.NodeCount, out _, out _, out _, out _), Is.False);
+        }
+
+        [Test]
         public void BvhQuery_WarmPathAllocatesZeroManagedBytes()
         {
             FPOrientedBox2[] obstacles = BuildObstacles();

@@ -1,14 +1,22 @@
 # Swarm-ECS-Sandbox
 
-> 10,000 Agents · Q16.16 Fixed-Point · Custom SoA ECS · Budgeted A* · Uniform Grid / KD-Tree · RVO2-style ORCA · Rollback · Versioned Replay · Indirect Rendering
+> 10,000 Agents · Q16.16 Fixed-Point · Custom SoA ECS · Budgeted A* · Uniform Grid / KD-Tree · RVO2-style ORCA · Rollback · Versioned Replay · Interactive Technical Lab · Indirect Rendering
 
 Swarm-ECS-Sandbox 是一个面向大规模确定性仿真的 Unity 工程。10,000 个 Agent 的权威逻辑运行在纯 C#、固定容量、固定时间步的数据层；Unity 负责输入、调试界面与 GPU 表现。核心仿真不依赖 Unity Physics、NavMesh，也不为每个 Agent 创建 GameObject。
 
 ![10,000-agent Swarm ECS Sandbox](Docs/Images/swarm-sandbox.png)
 
+### Runtime lab views
+
+| Navigation: grid, rejected target and shared A* | Avoidance: sampled neighbors and ORCA half-planes |
+|---|---|
+| ![Navigation lab](Docs/Images/lab-navigation.png) | ![Avoidance lab](Docs/Images/lab-avoidance.png) |
+| Collision: immutable BVH, CCD and contact normals | Rollback: before/after correction samples |
+| ![Collision lab](Docs/Images/lab-collision.png) | ![Rollback lab](Docs/Images/lab-rollback.png) |
+
 ## Release line
 
-`v0.3.0` 在导航与 rollback 基线上补齐了静态障碍避让、保守连续碰撞检测、运动学限幅、版本化 replay、分层权威哈希与字段级不同步定位。公开能力以 Git tag、GitHub Release 和同一 commit 生成的证据附件为准；工作树中的结果不视为发布证据。
+`v0.3.1` 在 v0.3.0 确定性模拟内核上增加五个交互式技术实验视图，把共享 A*、空间查询、ORCA、BVH、CCD 和 rollback correction 直接映射为世界空间覆盖层。新增诊断数据固定容量、只读且不进入权威哈希、snapshot 或 replay schema。公开能力以 Git tag、GitHub Release 和同一 commit 生成的证据附件为准；工作树中的结果不视为发布证据。
 
 默认 GitHub Actions 会执行无需 Unity License 的静态工程与证据格式校验。Unity EditMode job 只有配置授权后才运行，因此静态 job 通过不代表远端已执行 Unity 测试。
 
@@ -40,6 +48,7 @@ flowchart LR
 - **Bounded kinematics**：ORCA 目标速度之后应用最大加速度、最大转向步长与最大速度限制；所有参数进入 `ConfigHash`。
 - **Rollback and catch-up**：64 tick snapshot ring、按 `(tick, sequence)` 排序的固定容量命令时间线、延迟命令回滚重演，以及追帧期间跳过中间渲染。
 - **Versioned replay and diagnostics**：`.swarmreplay` 固定字节序、显式 schema/config/logic 信息、命令与 checkpoint、完整性校验、有界执行预算、O(N) 规范命令装载与顺序播放；分层权威哈希可进一步定位到 component、entity/group、field 与 raw value。
+- **Interactive technical lab**：Overview / Navigation / Avoidance / Collision / Rollback 五页分层 HUD；世界空间显示真实共享路线、阻塞节点、采样邻居、ORCA 速度约束、BVH bounds、CCD contact/slide 与 rollback ghost。覆盖层使用 caller-owned/fixed-capacity 诊断缓冲，不写回权威 World。
 - **Indirect rendering**：CPU 上传 Agent 结构化数据，Unity 6 `Graphics.RenderMeshIndirect` 以一个 Agent indirect command 绘制；没有逐 Agent GameObject。
 - **Commercial integration boundary**：工程固定 YooAsset 3.0.4 与 HybridCLR 8.12.0，并提供程序集、资源收集与加载边界；目标平台发布闭环仍需独立验收。
 
@@ -59,6 +68,16 @@ flowchart LR
 2. 打开 `Assets/Scenes/SwarmSandbox.unity` 并进入 Play Mode。
 3. 从 HUD 观察 logic tick、CPU/tick、路径预算、空间查询、ORCA、CCD、限幅、状态哈希和 rollback。
 
+技术实验页可通过 HUD 标签或数字键切换：
+
+| Key | Lab view | Visible evidence |
+|---|---|---|
+| `1` | Overview | 实时逻辑预算、完整 pipeline、hash 与共享路线 |
+| `2` | Navigation | 64×64 Grid、阻塞节点、共享 A*、目标与请求/缓存状态 |
+| `3` | Avoidance | 真实采样邻居、Agent/Obstacle ORCA lines、preferred/safe velocity |
+| `4` | Collision | OBB、BVH bounds、确定性 CCD probe、实时 contact/normal/slide |
+| `5` | Rollback | late command 的预测/修正 ghost、重演区间与 before/after hash |
+
 | Key | Action |
 |---|---|
 | `Space` | 暂停 / 继续 |
@@ -67,6 +86,8 @@ flowchart LR
 | `K` | 循环 `Uniform Grid radius → KD-Tree radius → KD-Tree exact KNN`，以权威命令切换 |
 | `R` | 使用相同 seed 重置世界 |
 | `WASD` / 滚轮 | 平移 / 缩放相机 |
+
+Navigation 页的 `QUEUE BLOCKED TARGET` 通过正常权威命令把 Group 0 目标放入中心障碍，用于展示不可达请求的固定预算拒绝；`RESET` 恢复基准世界。Collision 页同时区分 presentation-only deterministic probe 与最近真实 ECS CCD contacts。
 
 ## Validation
 
@@ -122,6 +143,7 @@ Assets/SwarmSandbox/
 ├── Simulation/Determinism   Layered hashes and desync diagnostics
 ├── Simulation/Systems       Navigation, avoidance, motion and workers
 ├── Runtime/Rendering        GraphicsBuffer and indirect rendering
+├── Runtime/UI               Layered HUD and presentation-only technical overlays
 ├── Runtime/Commercial       YooAsset / HybridCLR integration boundary
 └── Editor                   Scene, tests, benchmark and replay tools
 ```
@@ -137,6 +159,7 @@ Assets/SwarmSandbox/
 - replay 与字段级 diff 已提供可复现和定位工具，但跨 Mono/IL2CPP、ARM64/x64 的完整哈希矩阵仍需由对应平台 artifact 证明。
 - 当前没有真实 UDP/KCP transport、服务器仲裁、输入确认、超 rollback 窗口的 full snapshot recovery 或断线重连协议。
 - Agent 渲染仍由 CPU 每帧上传全部实例；没有 per-instance GPU culling、Hi-Z 或 HLOD。
+- Technical Lab 覆盖层使用 Unity `float`、GL lines 与采样诊断，只负责解释权威结果；它不进入状态哈希、snapshot、replay 或 headless benchmark 时间口径。
 
 ## Documentation
 
@@ -147,7 +170,7 @@ Assets/SwarmSandbox/
 - [`Docs/ROADMAP_2027.md`](Docs/ROADMAP_2027.md)：后续版本顺序与量化门禁
 - [`Docs/COMMERCIAL_PIPELINE.md`](Docs/COMMERCIAL_PIPELINE.md)：YooAsset + HybridCLR 当前接入范围
 - [`Docs/RELEASE_CHECKLIST.md`](Docs/RELEASE_CHECKLIST.md)：发布前验证与证据清单
-- [`Docs/RELEASE_NOTES_v0.3.0.md`](Docs/RELEASE_NOTES_v0.3.0.md)：v0.3.0 变化、验证入口与已知限制
+- [`Docs/RELEASE_NOTES_v0.3.1.md`](Docs/RELEASE_NOTES_v0.3.1.md)：v0.3.1 变化、视图证据与已知限制
 - [`CHANGELOG.md`](CHANGELOG.md)：版本变更记录
 
 ## License

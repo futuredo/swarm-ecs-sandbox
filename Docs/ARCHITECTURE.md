@@ -57,7 +57,7 @@ Entity identity is `Index + Generation`. Arrays have fixed capacity and hot Syst
 | Immutable setup | seed, group, radius, max speed, formation offset, config, static obstacle topology | Rebuilt from the same input; topology changes start a new epoch |
 | Derived hot data | preferred/next velocity, query scratch, ORCA lines | Recomputed; excluded from snapshots |
 | Derived path cache | shared path nodes/waypoints and cache entries | Rebuilt from authoritative keys and deterministic A* |
-| Presentation | HUD strings, camera and GPU upload buffers | Excluded from authority |
+| Presentation | HUD strings, camera, technical-lab samples and GPU upload buffers | Excluded from authority |
 
 ## 4. Navigation
 
@@ -145,5 +145,21 @@ Replay is an observability and reproduction mechanism, not a network transport. 
 ## 9. Rendering and memory
 
 `SwarmIndirectRenderer` converts fixed-point raw values to presentation floats, uploads all Agents to a `GraphicsBuffer`, and draws them through one `Graphics.RenderMeshIndirect` Agent command. Ground and obstacles use separate draws. There is currently one aggregate bounds test, not per-instance GPU visibility, Hi-Z or HLOD.
+
+### Interactive technical lab
+
+`SwarmDebugHud` selects one of five presentation views and `SwarmTechnicalOverlayRenderer` maps live runtime structures into world-space lines and labels:
+
+| View | Data source | Presentation |
+|---|---|---|
+| Overview | group paths, group targets and live stage counters | end-to-end pipeline map |
+| Navigation | `GridMap`, `SharedPath`, request/cache/island counters | grid topology, blocked cells and four shared routes |
+| Avoidance | active spatial index and the existing ORCA line builder | one Agent's selected neighbors, constraint lines and preferred/solved velocity |
+| Collision | static obstacle segments, immutable BVH and CCD diagnostics | BVH bounds, deterministic sweep probe and recent live contacts |
+| Rollback | sampled positions immediately before and after late-command replay | correction vectors across the replay transaction |
+
+Diagnostic APIs copy into fixed-capacity buffers owned by the presentation caller. They do not mutate component columns, consume navigation budget, append timeline commands or participate in snapshot/hash/replay serialization. The navigation and rollback buttons are explicit experiments: when pressed, they enqueue normal authoritative commands through the existing command path. The collision sweep probe is presentation-only and is labelled separately from live ECS contacts.
+
+The overlay converts Q16.16 values to Unity `float` only after the fixed simulation step and renders with GL lines. It is excluded from headless benchmark timing and determinism claims.
 
 Component columns, spatial indices, A* storage, island flood queue, path cache, worker scratch, command timeline and snapshot ring allocate during setup. Sampling uses `GC.GetAllocatedBytesForCurrentThread()`, so a 0 B result proves only the measured thread’s allocation delta. All-worker allocation evidence requires a separate profiler capture.

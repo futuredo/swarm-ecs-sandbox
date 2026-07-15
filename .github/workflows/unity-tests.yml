@@ -419,11 +419,11 @@ jobs:
           test -f Docs/ARCHITECTURE.md
           test -f Docs/DETERMINISM_AND_NETCODE.md
           test -f Docs/TECHNICAL_WALKTHROUGH.md
-          test -f Docs/RELEASE_NOTES_v0.3.0.md
+          test -f Docs/RELEASE_NOTES_v0.3.1.md
           test -f Docs/COMMERCIAL_PIPELINE.md
           test -f THIRD_PARTY_NOTICES.md
           test -f LICENSES/Apache-2.0.txt
-          grep -q '^  bundleVersion: 0.3.0$' ProjectSettings/ProjectSettings.asset
+          grep -q '^  bundleVersion: 0.3.1$' ProjectSettings/ProjectSettings.asset
           test -x Scripts/run-spatial-index-benchmark-matrix.sh
           test -x Scripts/run-cross-process-replay.sh
           bash -n Scripts/run-spatial-index-benchmark-matrix.sh
@@ -570,7 +570,7 @@ jobs:
             Docs/DETERMINISM_AND_NETCODE.md
             Docs/ROADMAP_2027.md
             Docs/RELEASE_CHECKLIST.md
-            Docs/RELEASE_NOTES_v0.3.0.md
+            Docs/RELEASE_NOTES_v0.3.1.md
             Docs/TECHNICAL_WALKTHROUGH.md
             Docs/BENCHMARKING.md
             Docs/COMMERCIAL_PIPELINE.md

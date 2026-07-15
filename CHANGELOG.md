@@ -6,6 +6,26 @@ This file records verifiable public changes. Unreleased work remains under `Unre
 
 - No entries.
 
+## [0.3.1] - 2026-07-15
+
+### Added
+
+- Five presentation-only technical lab views for overview, navigation, avoidance, collision and rollback inspection.
+- World-space overlays for the deterministic navigation grid, blocked cells, shared A* routes, goals, sampled neighbors, reconstructed ORCA constraints, obstacle topology, immutable BVH bounds, CCD contacts and rollback correction ghosts.
+- Fixed-capacity CCD contact diagnostics and caller-buffer Agent/ORCA sampling APIs that remain outside snapshots, hashes and replay payloads.
+- Interactive blocked-target rejection, spatial-mode cycling, sampled-group selection, retained CCD traces and late-command rollback controls.
+
+### Changed
+
+- The runtime HUD now separates live rendering, logic budget, navigation, avoidance, collision and rollback metrics instead of presenting one dense counter wall.
+- The macOS/Player presentation identifies live FPS and per-tick simulation cost separately from tracked headless benchmark evidence.
+
+### Evidence boundary
+
+- Technical overlays are diagnostic views of real runtime data; they do not alter authoritative state or constitute additional simulation features.
+- The deterministic CCD probe is presentation-only and is labelled separately from retained live ECS collision contacts.
+- Runtime overlays use Unity `float`/GL rendering after the fixed-point step and are intentionally excluded from determinism claims.
+
 ## [0.3.0] - 2026-07-14
 
 ### Added

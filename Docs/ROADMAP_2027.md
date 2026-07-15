@@ -8,6 +8,7 @@ The project evolves in dependency order:
 v0.2.1  Navigation completeness
   → v0.2.2  Static avoidance and continuous collision safety
   → v0.3.0  Versioned replay and desync diagnostics
+  → v0.3.1  Interactive technical lab and runtime observability
   → v0.4    Authoritative UDP session with two clients
   → v0.5    Reconnect, snapshots and state repair
   → v0.6    Long-run performance and stability matrix
@@ -55,6 +56,15 @@ The motion limiter runs after a holonomic ORCA solve. It can move the final velo
 - Replay and diagnostic schema tests covering malformed input and deliberate authority mutations.
 
 This version provides the mechanism for cross-process evidence. A complete Mono/IL2CPP and ARM64/x64 result matrix still requires artifacts from those targets.
+
+### v0.3.1 — Interactive technical lab
+
+- Five switchable runtime views for system overview, navigation, avoidance, collision and rollback.
+- World-space inspection of the real shared paths, grid topology, selected neighbors, reconstructed ORCA constraints, immutable BVH bounds, CCD contacts and rollback correction samples.
+- Fixed-capacity, caller-owned diagnostic sampling that cannot write to the authoritative World.
+- Automated Player capture selection for repeatable visual inspection of every lab view.
+
+This patch changes observability and presentation only. Diagnostic buffers, Unity `float` conversion and GL overlays remain outside authority hashes, snapshots, replay payloads and headless benchmark timing.
 
 ## 3. v0.4 — Authoritative UDP session
 

@@ -210,6 +210,133 @@ public sealed class NeighborAvoidanceSystem : IDisposable
         _workerPool?.Dispose();
     }
 
+    /// <summary>
+    /// Rebuilds one Agent's actual neighbor and ORCA constraint sample from the
+    /// spatial index produced by the latest simulation tick. Results are copied to
+    /// caller-owned buffers and never mutate authoritative world state.
+    /// </summary>
+    public bool TryBuildDiagnosticSample(
+        SwarmWorld world,
+        int entityIndex,
+        int[] neighborIds,
+        OrcaLine[] lines,
+        out int neighborCount,
+        out int lineCount,
+        out int obstacleLineCount,
+        out FPVector2 solvedVelocity)
+    {
+        if (world == null)
+        {
+            throw new ArgumentNullException(nameof(world));
+        }
+
+        if (neighborIds == null)
+        {
+            throw new ArgumentNullException(nameof(neighborIds));
+        }
+
+        if (lines == null)
+        {
+            throw new ArgumentNullException(nameof(lines));
+        }
+
+        neighborCount = 0;
+        lineCount = 0;
+        obstacleLineCount = 0;
+        solvedVelocity = FPVector2.Zero;
+        if (_disposed || (uint)entityIndex >= (uint)world.Count)
+        {
+            return false;
+        }
+
+        int queryCount;
+        int[] queryResults;
+        if (Mode == SpatialIndexMode.KdTreeKNearest)
+        {
+            _kdTree.QueryKNearest(
+                world.Positions[entityIndex],
+                _mainScratch.QueryLimit,
+                _kdQueryResults,
+                out queryCount);
+            queryResults = _kdQueryResults;
+        }
+        else if (Mode == SpatialIndexMode.KdTree)
+        {
+            _kdTree.QueryRadius(
+                world.Positions[entityIndex],
+                world.Config.NeighborDistance,
+                _kdQueryResults,
+                out queryCount);
+            queryResults = _kdQueryResults;
+        }
+        else
+        {
+            _uniformGrid.QueryRadius(
+                world.Positions[entityIndex],
+                world.Config.NeighborDistance,
+                _mainScratch.QueryLimit,
+                _mainScratch.QueryEntityIds,
+                _mainScratch.QueryDistances,
+                out queryCount);
+            queryResults = _mainScratch.QueryEntityIds;
+        }
+
+        int activeNeighborCount = 0;
+        for (int resultIndex = 0;
+            resultIndex < queryCount && activeNeighborCount < _mainScratch.Neighbors.Length;
+            ++resultIndex)
+        {
+            int other = queryResults[resultIndex];
+            if (other == entityIndex)
+            {
+                continue;
+            }
+
+            _mainScratch.Neighbors[activeNeighborCount] = new AgentNeighbor(
+                other,
+                world.Positions[other] - world.Positions[entityIndex],
+                world.Velocities[other],
+                world.Radii[other]);
+            if (activeNeighborCount < neighborIds.Length)
+            {
+                neighborIds[activeNeighborCount] = other;
+            }
+
+            activeNeighborCount++;
+        }
+
+        int obstacleNeighborCount = CollectObstacleNeighbors(world, entityIndex, _mainScratch);
+        int totalLineCount = OrcaSolver.Solve(
+            entityIndex,
+            world.Positions[entityIndex],
+            world.Velocities[entityIndex],
+            world.PreferredVelocities[entityIndex],
+            world.Radii[entityIndex],
+            world.MaxSpeeds[entityIndex],
+            world.Config.TimeHorizon,
+            world.Config.FixedDeltaTime,
+            _mainScratch.ObstacleNeighbors,
+            obstacleNeighborCount,
+            _mainScratch.Neighbors,
+            activeNeighborCount,
+            _mainScratch.Lines,
+            _mainScratch.ProjectionLines,
+            out obstacleLineCount,
+            out solvedVelocity);
+
+        neighborCount = activeNeighborCount < neighborIds.Length
+            ? activeNeighborCount
+            : neighborIds.Length;
+        lineCount = totalLineCount < lines.Length ? totalLineCount : lines.Length;
+        Array.Copy(_mainScratch.Lines, 0, lines, 0, lineCount);
+        if (obstacleLineCount > lineCount)
+        {
+            obstacleLineCount = lineCount;
+        }
+
+        return true;
+    }
+
     private void ExecuteKdTree(
         SwarmWorld world,
         bool useKNearest,

@@ -89,6 +89,34 @@ namespace SwarmECS.Simulation.Spatial
             return _obstacleBounds[obstacleId];
         }
 
+        /// <summary>
+        /// Exposes immutable node geometry for presentation-only BVH visualization.
+        /// Traversal and simulation behavior remain private to the broadphase.
+        /// </summary>
+        public bool TryGetNodeDiagnostic(
+            int nodeIndex,
+            out FPAabb2 bounds,
+            out int left,
+            out int right,
+            out int obstacleId)
+        {
+            if ((uint)nodeIndex >= (uint)_nodeCount)
+            {
+                bounds = default;
+                left = -1;
+                right = -1;
+                obstacleId = -1;
+                return false;
+            }
+
+            Node node = _nodes[nodeIndex];
+            bounds = node.Bounds;
+            left = node.Left;
+            right = node.Right;
+            obstacleId = node.ObstacleId;
+            return true;
+        }
+
         public void QueryAabb(
             in FPAabb2 query,
             StaticObstacleQueryScratch scratch,

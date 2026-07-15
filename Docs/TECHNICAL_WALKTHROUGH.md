@@ -145,7 +145,19 @@ A useful verification sequence is:
 
 This proves same-input reproducibility and diagnostic precision in the tested environment. Repeat the exact file on every backend/architecture before reporting platform compatibility.
 
-## 8. Read benchmark evidence correctly
+## 8. Inspect the interactive technical lab
+
+Run the Player or enter Play Mode, then switch views with `1` through `5`:
+
+1. **Overview** relates the live timing/hash counters to the complete simulation pipeline.
+2. **Navigation** draws the real 64×64 grid, blocked cells and four shared paths. `QUEUE BLOCKED TARGET` sends a normal command whose destination is inside the central obstacle; the scheduled request is rejected by the normal walkability/region precheck.
+3. **Avoidance** samples one live Agent through the currently selected Uniform Grid or KD mode and rebuilds its actual Agent/obstacle ORCA constraints into caller-owned buffers.
+4. **Collision** draws immutable obstacle-BVH nodes, a labelled presentation-only swept-circle probe and retained live ECS CCD contacts.
+5. **Rollback** injects an 18-tick-late command and displays sampled before/after positions around the real snapshot restore and replay transaction.
+
+The overlay is an inspection surface, not authority. Confirm that its APIs do not modify `SwarmWorld`, enter hashes/snapshots/replay, or run inside the headless benchmark measurement. Automated Player screenshots accept `-swarmCapturePath <path>` and `-swarmCaptureView <Overview|Navigation|Avoidance|Collision|Rollback>`.
+
+## 9. Read benchmark evidence correctly
 
 The tracked default and spatial-matrix JSON files contain workload, execution policy, timing, current-thread allocation, navigation counters, obstacle/Agent lines, BVH counters, CCD/fallback counters, motion-limit counters and hashes.
 
@@ -159,13 +171,13 @@ The following conclusions are intentionally excluded:
 
 See [`BENCHMARKING.md`](BENCHMARKING.md) for commands and field definitions.
 
-## 9. Inspect presentation and delivery boundaries
+## 10. Inspect presentation and delivery boundaries
 
 `SwarmIndirectRenderer` uploads all Agent data and uses one Agent indirect draw command. It does not yet build a GPU-visible index list or perform Hi-Z/HLOD.
 
 YooAsset and HybridCLR are isolated behind runtime/editor integration points. Their pinned packages and configuration are present, while installer, IL2CPP, bundle/CDN and rollback verification remain a separate delivery pipeline. See [`COMMERCIAL_PIPELINE.md`](COMMERCIAL_PIPELINE.md).
 
-## 10. Run the complete local suite
+## 11. Run the complete local suite
 
 ```bash
 mkdir -p TestResults

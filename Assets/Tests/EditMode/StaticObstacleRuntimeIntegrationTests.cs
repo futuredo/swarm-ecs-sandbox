@@ -68,6 +68,90 @@ namespace SwarmECS.Tests.EditMode
         }
 
         [Test]
+        public void Movement_CcdDiagnosticsCaptureStableAgentAndGeometryWithoutChangingResult()
+        {
+            SwarmConfig config = CreateConfig(
+                1,
+                FP.One,
+                FP.Half,
+                FP.FromInt(30),
+                FP.FromInt(1000),
+                FP.FromInt(8),
+                0,
+                FP.FromInt(2));
+            SwarmWorld world = CreateWorld(config, 1);
+            world.Positions[0] = V(-10, 0);
+            world.Velocities[0] = V(30, 0);
+            world.NextVelocities[0] = V(30, 0);
+            StaticObstacleCollisionSystem obstacles = CreateUnitBoxSystem();
+            MovementIntegrationSystem movement = new();
+
+            movement.Execute(world, obstacles);
+
+            Assert.That(obstacles.LastSweepDiagnosticCount, Is.EqualTo(1));
+            Assert.That(
+                obstacles.TryGetLastSweepDiagnostic(0, out SweepContactDiagnostic diagnostic),
+                Is.True);
+            Assert.That(diagnostic.AgentId, Is.Zero);
+            Assert.That(diagnostic.ObstacleId, Is.Zero);
+            Assert.That(diagnostic.FeatureId, Is.Zero);
+            Assert.That(diagnostic.Start, Is.EqualTo(V(-10, 0)));
+            Assert.That(diagnostic.RequestedEnd, Is.EqualTo(V(20, 0)));
+            Assert.That(diagnostic.Impact, Is.EqualTo(world.Positions[0]));
+            Assert.That(diagnostic.Normal, Is.EqualTo(-FPVector2.UnitX));
+            Assert.That(diagnostic.Fraction, Is.GreaterThan(FP.Zero));
+
+            obstacles.BeginTick();
+            Assert.That(obstacles.LastSweepDiagnosticCount, Is.Zero);
+            Assert.That(obstacles.TryGetLastSweepDiagnostic(0, out _), Is.False);
+        }
+
+        [Test]
+        public void AvoidanceDiagnosticSampleMatchesLiveSolverWithoutMutatingWorld()
+        {
+            SwarmConfig config = CreateConfig(
+                2,
+                FP.FromRatio(1, 30),
+                FP.Half,
+                FP.FromInt(3),
+                FP.FromInt(100),
+                FP.FromInt(4),
+                1,
+                FP.FromInt(2));
+            SwarmWorld world = CreateWorld(config, 2);
+            world.Positions[0] = V(-1, 0);
+            world.Positions[1] = V(1, 0);
+            world.Velocities[0] = FPVector2.Zero;
+            world.Velocities[1] = FPVector2.Zero;
+            world.PreferredVelocities[0] = V(2, 0);
+            world.PreferredVelocities[1] = V(-2, 0);
+            using NeighborAvoidanceSystem avoidance = new(config);
+            avoidance.Execute(world);
+            FPVector2 liveVelocity = world.NextVelocities[0];
+            ulong stateBefore = world.ComputeStateHash();
+            int[] neighbors = new int[4];
+            var lines = new SwarmECS.Simulation.Avoidance.OrcaLine[16];
+
+            bool built = avoidance.TryBuildDiagnosticSample(
+                world,
+                0,
+                neighbors,
+                lines,
+                out int neighborCount,
+                out int lineCount,
+                out int obstacleLineCount,
+                out FPVector2 diagnosticVelocity);
+
+            Assert.That(built, Is.True);
+            Assert.That(neighborCount, Is.EqualTo(1));
+            Assert.That(neighbors[0], Is.EqualTo(1));
+            Assert.That(lineCount, Is.EqualTo(1));
+            Assert.That(obstacleLineCount, Is.Zero);
+            Assert.That(diagnosticVelocity, Is.EqualTo(liveVelocity));
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(stateBefore));
+        }
+
+        [Test]
         public void PublicObstacleSnapshotsCannotMutateRuntimeGeometry()
         {
             StaticObstacleCollisionSystem obstacles = CreateUnitBoxSystem();
