@@ -1,6 +1,6 @@
 # Swarm-ECS-Sandbox
 
-> 10,000 Agents · Q16.16 Fixed-Point · Custom SoA ECS · Budgeted A* · Uniform Grid / KD-Tree · RVO2-style ORCA · Rollback · Versioned Replay · Interactive Technical Lab · Indirect Rendering
+> 10,000 Agents · Q16.16 Fixed-Point · Custom SoA ECS · Budgeted A* · Uniform Grid / KD-Tree · RVO2-style ORCA · Authoritative UDP · Prediction/Rollback · Versioned Replay · Indirect Rendering
 
 Swarm-ECS-Sandbox 是一个面向大规模确定性仿真的 Unity 工程。10,000 个 Agent 的权威逻辑运行在纯 C#、固定容量、固定时间步的数据层；Unity 负责输入、调试界面与 GPU 表现。核心仿真不依赖 Unity Physics、NavMesh，也不为每个 Agent 创建 GameObject。
 
@@ -14,9 +14,13 @@ Swarm-ECS-Sandbox 是一个面向大规模确定性仿真的 Unity 工程。10,0
 | Collision: immutable BVH, CCD and contact normals | Rollback: before/after correction samples |
 | ![Collision lab](Docs/Images/lab-collision.png) | ![Rollback lab](Docs/Images/lab-rollback.png) |
 
+![Authoritative UDP lab](Docs/Images/lab-network.png)
+
 ## Release line
 
-`v0.3.1` 在 v0.3.0 确定性模拟内核上增加五个交互式技术实验视图，把共享 A*、空间查询、ORCA、BVH、CCD 和 rollback correction 直接映射为世界空间覆盖层。新增诊断数据固定容量、只读且不进入权威哈希、snapshot 或 replay schema。公开能力以 Git tag、GitHub Release 和同一 commit 生成的证据附件为准；工作树中的结果不视为发布证据。
+`v0.4.0` 增加真实 loopback/LAN UDP 会话：一个 headless 权威服务器与两个独立预测客户端通过版本化数据报、ack/ackBits、可靠命令、非可靠 hash telemetry 和固定容量线程交接队列通信。服务器统一决定命令 tick/sequence；客户端保持 prediction lead，在迟到命令到达后回滚重演并逐 tick 确认权威 hash。超出历史窗口的命令进入显式 `SnapshotRequired` 状态，完整 snapshot repair 与 reconnect 留给 v0.5。
+
+公开能力以 Git tag、GitHub Release 和同一 commit 生成的证据附件为准；工作树中的结果不视为发布证据。
 
 默认 GitHub Actions 会执行无需 Unity License 的静态工程与证据格式校验。Unity EditMode job 只有配置授权后才运行，因此静态 job 通过不代表远端已执行 Unity 测试。
 
@@ -32,6 +36,8 @@ flowchart LR
     F --> G["SAT fallback"]
     G --> H["Snapshot / hash / replay"]
     H -. "presentation only" .-> I["GPU indirect rendering"]
+    J["UDP commands"] --> A
+    H --> K["Hash telemetry"]
 ```
 
 权威状态只使用 Q16.16、稳定遍历顺序和显式 tie-break。渲染层可使用 `float` 与可变帧率，但表现值不会写回仿真。
@@ -47,18 +53,22 @@ flowchart LR
 - **Fixed-point collision pipeline**：OBB 基轴量化为 Q16.16 点积下的严格正交单位基，BVH bounds 包含有证明上界的 raw-unit 截断保护；expanded-OBB slab conservative CCD、exact-raw circle corner distance、固定次数 impact/slide、SAT 最终穿透恢复与残余深度遥测。
 - **Bounded kinematics**：ORCA 目标速度之后应用最大加速度、最大转向步长与最大速度限制；所有参数进入 `ConfigHash`。
 - **Rollback and catch-up**：64 tick snapshot ring、按 `(tick, sequence)` 排序的固定容量命令时间线、延迟命令回滚重演，以及追帧期间跳过中间渲染。
+- **Authoritative UDP session**：一个 headless Server 与两个独立 Client；44-byte 显式小端 packet header、CRC32、32-bit serial arithmetic、ack/ackBits、可靠重传、应用层命令顺序、输入延迟、prediction lead、逐 tick hash 确认和 `SnapshotRequired` 失败状态。Socket 线程只向固定容量队列复制数据报，不能访问 `SwarmWorld`。
+- **Deterministic weak network**：在真实 socket send 前注入可复现的 latency、jitter、loss、duplication 与 reorder；固定容量调度器记录丢包、重复、乱序、容量溢出、RTT、带宽和重传数据。
 - **Versioned replay and diagnostics**：`.swarmreplay` 固定字节序、显式 schema/config/logic 信息、命令与 checkpoint、完整性校验、有界执行预算、O(N) 规范命令装载与顺序播放；分层权威哈希可进一步定位到 component、entity/group、field 与 raw value。
-- **Interactive technical lab**：Overview / Navigation / Avoidance / Collision / Rollback 五页分层 HUD；世界空间显示真实共享路线、阻塞节点、采样邻居、ORCA 速度约束、BVH bounds、CCD contact/slide 与 rollback ghost。覆盖层使用 caller-owned/fixed-capacity 诊断缓冲，不写回权威 World。
+- **Interactive technical lab**：Overview / Navigation / Avoidance / Collision / Rollback / Network 六页分层 HUD；世界空间显示真实共享路线、阻塞节点、采样邻居、ORCA 速度约束、BVH bounds、CCD contact/slide 与 rollback ghost，Network 页明确区分本地交互 World 和外部三进程资格验证。覆盖层使用 caller-owned/fixed-capacity 诊断缓冲，不写回权威 World。
 - **Indirect rendering**：CPU 上传 Agent 结构化数据，Unity 6 `Graphics.RenderMeshIndirect` 以一个 Agent indirect command 绘制；没有逐 Agent GameObject。
 - **Commercial integration boundary**：工程固定 YooAsset 3.0.4 与 HybridCLR 8.12.0，并提供程序集、资源收集与加载边界；目标平台发布闭环仍需独立验收。
 
 ## Reproducible evidence
 
-仓库跟踪三组 10k headless 结果：
+仓库跟踪三组 10k headless benchmark、一组独立进程 replay，以及一组真实 UDP 会话结果：
 
 - [`BenchmarkResults/latest.json`](BenchmarkResults/latest.json) / [`latest.md`](BenchmarkResults/latest.md)：默认 Uniform Grid 的完整逻辑 tick。
 - [`BenchmarkResults/spatial-index-matrix.json`](BenchmarkResults/spatial-index-matrix.json) / [`spatial-index-matrix.md`](BenchmarkResults/spatial-index-matrix.md)：相同 seed/config 下的三种完整运行模式。
 - [`BenchmarkResults/obstacle-approach/latest.json`](BenchmarkResults/obstacle-approach/latest.json) / [`latest.md`](BenchmarkResults/obstacle-approach/latest.md)：延长 warmup/sample、实际触发静态障碍 ORCA 与 CCD 的场景。
+- [`ReplayResults/latest.md`](ReplayResults/latest.md)：两个独立 Unity 进程对同一版本化 replay 的逐 checkpoint 校验和字段级 desync probe。
+- [`NetworkResults/latest/latest.md`](NetworkResults/latest/latest.md) / [`summary.json`](NetworkResults/latest/summary.json)：三个独立 Player 进程的权威 UDP 弱网会话；保留 Server/Client 原始 JSON 报告。
 
 结果记录 Unity/CPU/Graphics Device、warmup/sample、执行策略、`ConfigHash`、full/canonical state hash，以及 obstacle/agent ORCA lines、BVH query/candidate、CCD、SAT fallback、加速度/转向限幅等计数。`Null Device` 只代表纯逻辑测量，不代表渲染帧率；`managedBytesAcrossSamples` 只覆盖采样线程，不等同于所有 worker 均零分配。
 
@@ -77,6 +87,7 @@ flowchart LR
 | `3` | Avoidance | 真实采样邻居、Agent/Obstacle ORCA lines、preferred/safe velocity |
 | `4` | Collision | OBB、BVH bounds、确定性 CCD probe、实时 contact/normal/slide |
 | `5` | Rollback | late command 的预测/修正 ghost、重演区间与 before/after hash |
+| `6` | Network | UDP envelope、可靠性、三进程拓扑、prediction/repair 边界与复现入口 |
 
 | Key | Action |
 |---|---|
@@ -127,6 +138,14 @@ SWARM_AGENT_COUNT=10000 SWARM_WARMUP_TICKS=8 SWARM_SAMPLE_TICKS=32 \
 
 `verify.json` 记录独立 PID、逐 checkpoint 比对、最终分层权威哈希，以及对 `AgentPositions[0].X.Raw` 的可控 desync probe。三模式矩阵与证据字段说明见 [`Docs/BENCHMARKING.md`](Docs/BENCHMARKING.md)。发布前应在目标 commit 上重新生成测试、benchmark、replay 和 Player 证据；具体流程见 [`Docs/RELEASE_CHECKLIST.md`](Docs/RELEASE_CHECKLIST.md)。
 
+构建 macOS Player 后运行真实 `1 Server + 2 Clients` UDP 验证：
+
+```bash
+./Scripts/run-authoritative-udp-session.sh
+```
+
+脚本要求三个不同的操作系统进程在弱网注入下完成握手、四条命令仲裁、可靠重传、预测回滚和最终 hash 收敛，并写入 `NetworkResults/latest/`。默认运行 210 tick 的发布资格验证；长时间 soak 可设置 `SWARM_NETWORK_FINAL_TICK=54000`。具体 envelope、状态机和边界见 [`Docs/PROTOCOL_v0.4.md`](Docs/PROTOCOL_v0.4.md)。
+
 ## Repository map
 
 ```text
@@ -138,12 +157,13 @@ Assets/SwarmSandbox/
 ├── Simulation/Pathfinding   Grid, islands, A*, shared path cache
 ├── Simulation/Avoidance     Agent and obstacle ORCA constraints
 ├── Simulation/Collision     Fixed-point OBB, SAT and swept tests
-├── Simulation/Netcode       Command timeline, snapshots and rollback
+├── Simulation/Netcode       Command timeline, snapshots, rollback and UDP protocol primitives
 ├── Simulation/Replay        Versioned replay format and validation
 ├── Simulation/Determinism   Layered hashes and desync diagnostics
 ├── Simulation/Systems       Navigation, avoidance, motion and workers
 ├── Runtime/Rendering        GraphicsBuffer and indirect rendering
 ├── Runtime/UI               Layered HUD and presentation-only technical overlays
+├── Runtime/Networking       UDP socket worker, peer links and Server/Client session runners
 ├── Runtime/Commercial       YooAsset / HybridCLR integration boundary
 └── Editor                   Scene, tests, benchmark and replay tools
 ```
@@ -157,7 +177,8 @@ Assets/SwarmSandbox/
 - BVH 构建只发生在静态初始化阶段，使用确定性排序，最坏 `O(N²)`；剪枝查询最坏 `O(N)`，K 个结果的稳定排序为 `O(K log K)`。
 - KD 查询使用精确 branch pruning，但退化分布下仍可能访问 `O(N)` 节点，不能假定稳定 `O(log N)`。
 - replay 与字段级 diff 已提供可复现和定位工具，但跨 Mono/IL2CPP、ARM64/x64 的完整哈希矩阵仍需由对应平台 artifact 证明。
-- 当前没有真实 UDP/KCP transport、服务器仲裁、输入确认、超 rollback 窗口的 full snapshot recovery 或断线重连协议。
+- v0.4 transport 面向 loopback/LAN 实验，不包含加密、身份服务、NAT traversal、anti-cheat 或通用时钟同步。它使用输入延迟与有限 prediction lead，而不是生产级 clock discipline。
+- 超 rollback 窗口会显式进入 `SnapshotRequired`，但 v0.4 不传输或应用 full/delta snapshot，也不支持断线重连；这些属于 v0.5。
 - Agent 渲染仍由 CPU 每帧上传全部实例；没有 per-instance GPU culling、Hi-Z 或 HLOD。
 - Technical Lab 覆盖层使用 Unity `float`、GL lines 与采样诊断，只负责解释权威结果；它不进入状态哈希、snapshot、replay 或 headless benchmark 时间口径。
 
@@ -165,12 +186,13 @@ Assets/SwarmSandbox/
 
 - [`Docs/ARCHITECTURE.md`](Docs/ARCHITECTURE.md)：权威数据流、导航、避障、碰撞与内存边界
 - [`Docs/DETERMINISM_AND_NETCODE.md`](Docs/DETERMINISM_AND_NETCODE.md)：确定性契约、snapshot、replay 与 desync diagnostics
+- [`Docs/PROTOCOL_v0.4.md`](Docs/PROTOCOL_v0.4.md)：UDP envelope、可靠性、握手、Server/Client 状态机和线程边界
 - [`Docs/TECHNICAL_WALKTHROUGH.md`](Docs/TECHNICAL_WALKTHROUGH.md)：架构审阅路径与复现实验
 - [`Docs/BENCHMARKING.md`](Docs/BENCHMARKING.md)：基准入口、输出字段与解释边界
 - [`Docs/ROADMAP_2027.md`](Docs/ROADMAP_2027.md)：后续版本顺序与量化门禁
 - [`Docs/COMMERCIAL_PIPELINE.md`](Docs/COMMERCIAL_PIPELINE.md)：YooAsset + HybridCLR 当前接入范围
 - [`Docs/RELEASE_CHECKLIST.md`](Docs/RELEASE_CHECKLIST.md)：发布前验证与证据清单
-- [`Docs/RELEASE_NOTES_v0.3.1.md`](Docs/RELEASE_NOTES_v0.3.1.md)：v0.3.1 变化、视图证据与已知限制
+- [`Docs/RELEASE_NOTES_v0.4.0.md`](Docs/RELEASE_NOTES_v0.4.0.md)：v0.4.0 变化、网络证据与已知限制
 - [`CHANGELOG.md`](CHANGELOG.md)：版本变更记录
 
 ## License

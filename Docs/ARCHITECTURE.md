@@ -6,7 +6,7 @@ The project separates authoritative simulation from Unity presentation:
 
 - `SwarmECS.Core`: Q16.16 values, vectors and deterministic utilities; no `UnityEngine` reference.
 - `SwarmECS.Simulation`: SoA World, navigation, spatial queries, ORCA, collision, rollback, replay and diagnostics; no `UnityEngine` reference.
-- `SwarmECS.Runtime`: input, HUD, camera, GPU buffers and commercial loading boundary.
+- `SwarmECS.Runtime`: input, HUD, camera, GPU buffers, UDP process runners and commercial loading boundary.
 - `SwarmECS.Editor`: scene setup, tests, benchmark, replay tooling and package configuration.
 
 The simulation advances at a fixed 30 Hz. Rendering may use `float` and a variable frame rate, but presentation values never write back into authoritative state.
@@ -142,13 +142,25 @@ Layered authority hashing splits the full hash into config, world metadata, grou
 
 Replay is an observability and reproduction mechanism, not a network transport. Platform-wide bit identity requires running the same replay artifact on every claimed backend/architecture and retaining the results.
 
-## 9. Rendering and memory
+## 9. UDP transport and prediction
+
+The v0.4 runner starts as one of three independent Player processes. Server peer `0` owns canonical command timing; client peers `1` and `2` predict and reconcile the unchanged server-stamped `(tick, sequence)` values.
+
+The socket worker is deliberately narrower than a game session object. Its background thread performs envelope/CRC validation, learns the loopback/LAN endpoint for a declared peer and copies the raw datagram into `FixedDatagramQueue`. It has no simulation dependency. Unity's main thread owns receive-window state, fixed message decoding, ordered buffers, command timeline mutation, rollback and hash confirmation.
+
+Per-peer links maintain one packet receive window, one fixed reliable retransmission window and outgoing packet sequence. ACK-only packets are not themselves reliable. Duplicate reliable packets dirty ACK state so a lost ACK can recover on retransmission. Hash telemetry shares packet sequencing but remains non-reliable at the message layer.
+
+The weak-network scheduler is between encoding and `Socket.SendTo`; it stores complete encoded datagrams in fixed slots and injects latency/jitter/loss/duplication/reorder with stable due-time ordering. Reports separate impairment drops from queue-capacity drops and socket errors.
+
+This layer is a loopback/LAN deterministic-session laboratory. Peer identity is not authenticated, CRC is not a MAC, and v0.4 has no snapshot transfer or reconnect state repair.
+
+## 10. Rendering and memory
 
 `SwarmIndirectRenderer` converts fixed-point raw values to presentation floats, uploads all Agents to a `GraphicsBuffer`, and draws them through one `Graphics.RenderMeshIndirect` Agent command. Ground and obstacles use separate draws. There is currently one aggregate bounds test, not per-instance GPU visibility, Hi-Z or HLOD.
 
 ### Interactive technical lab
 
-`SwarmDebugHud` selects one of five presentation views and `SwarmTechnicalOverlayRenderer` maps live runtime structures into world-space lines and labels:
+`SwarmDebugHud` selects one of six presentation views and `SwarmTechnicalOverlayRenderer` maps live runtime structures into world-space lines and labels:
 
 | View | Data source | Presentation |
 |---|---|---|
@@ -157,6 +169,7 @@ Replay is an observability and reproduction mechanism, not a network transport. 
 | Avoidance | active spatial index and the existing ORCA line builder | one Agent's selected neighbors, constraint lines and preferred/solved velocity |
 | Collision | static obstacle segments, immutable BVH and CCD diagnostics | BVH bounds, deterministic sweep probe and recent live contacts |
 | Rollback | sampled positions immediately before and after late-command replay | correction vectors across the replay transaction |
+| Network | compiled protocol constants, process topology and external qualification contract | explicit local-scene versus three-process boundary and reproduction entry point |
 
 Diagnostic APIs copy into fixed-capacity buffers owned by the presentation caller. They do not mutate component columns, consume navigation budget, append timeline commands or participate in snapshot/hash/replay serialization. The navigation and rollback buttons are explicit experiments: when pressed, they enqueue normal authoritative commands through the existing command path. The collision sweep probe is presentation-only and is labelled separately from live ECS contacts.
 

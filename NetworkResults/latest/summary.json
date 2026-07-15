@@ -1,0 +1,32 @@
+{
+  "version": "0.4.0",
+  "timestampUtc": "2026-07-15T13:55:24.399886Z",
+  "processCount": 3,
+  "sessionId": 67108865,
+  "agentsPerWorld": 512,
+  "finalTick": 210,
+  "authorityCommands": 4,
+  "logicHash": "0x35B82A1C03E5E1B7",
+  "configHash": "0xB1C69F225212E13F",
+  "finalStateHash": "0x30B5586BCED9B103",
+  "inputDelayTicks": 2,
+  "predictionLeadTicks": 6,
+  "clientRollbackCounts": [
+    4,
+    4
+  ],
+  "clientRollbackMaximumTicks": [
+    10,
+    11
+  ],
+  "clientConfirmedHashSamples": [
+    192,
+    189
+  ],
+  "reliableRetransmissions": 23,
+  "weakLossDrops": 48,
+  "weakDuplicates": 33,
+  "weakReorders": 55,
+  "inboundQueueDrops": 0,
+  "socketErrors": 0
+}

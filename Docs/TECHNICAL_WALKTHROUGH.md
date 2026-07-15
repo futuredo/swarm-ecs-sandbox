@@ -145,19 +145,39 @@ A useful verification sequence is:
 
 This proves same-input reproducibility and diagnostic precision in the tested environment. Repeat the exact file on every backend/architecture before reporting platform compatibility.
 
-## 8. Inspect the interactive technical lab
+## 8. Trace one network command
 
-Run the Player or enter Play Mode, then switch views with `1` through `5`:
+Inspect the transport path in this order:
+
+```text
+SwarmUdpPacketCodec
+  → SwarmUdpSocketWorker
+  → FixedDatagramQueue
+  → PacketReceiveWindow / ReliableDatagramWindow
+  → ordered request or authority buffer
+  → ClientCommandReconciler
+  → RollbackController
+  → NetworkAuthorityHashHistory
+```
+
+Verify that the socket worker has no `SwarmWorld` reference, command tick/sequence come from the server, packet ACK state is distinct from application command order, and replay callbacks replace speculative tick hashes. `SwarmUdpProtocolTests` covers codecs, corruption, unsigned wraparound, duplicate/ACK windows, fixed queues, deterministic impairment, ordered messages, convergence and expired-history `SnapshotRequired`.
+
+After building the Player, run `./Scripts/run-authoritative-udp-session.sh`. Inspect the three raw JSON reports before the summary: process IDs must differ, common identities and final hashes must agree, both clients must receive all four commands, every received server hash sample must be confirmed, rollback/retransmission/impairment counters must be active, and all capacity/socket/pending counters must be zero.
+
+## 9. Inspect the interactive technical lab
+
+Run the Player or enter Play Mode, then switch views with `1` through `6`:
 
 1. **Overview** relates the live timing/hash counters to the complete simulation pipeline.
 2. **Navigation** draws the real 64×64 grid, blocked cells and four shared paths. `QUEUE BLOCKED TARGET` sends a normal command whose destination is inside the central obstacle; the scheduled request is rejected by the normal walkability/region precheck.
 3. **Avoidance** samples one live Agent through the currently selected Uniform Grid or KD mode and rebuilds its actual Agent/obstacle ORCA constraints into caller-owned buffers.
 4. **Collision** draws immutable obstacle-BVH nodes, a labelled presentation-only swept-circle probe and retained live ECS CCD contacts.
 5. **Rollback** injects an 18-tick-late command and displays sampled before/after positions around the real snapshot restore and replay transaction.
+6. **Network** displays the compiled envelope constants, process topology, prediction/repair contract and external qualification command. It explicitly labels the current scene as one local World rather than presenting static text as a live session.
 
-The overlay is an inspection surface, not authority. Confirm that its APIs do not modify `SwarmWorld`, enter hashes/snapshots/replay, or run inside the headless benchmark measurement. Automated Player screenshots accept `-swarmCapturePath <path>` and `-swarmCaptureView <Overview|Navigation|Avoidance|Collision|Rollback>`.
+The overlay is an inspection surface, not authority. Confirm that its APIs do not modify `SwarmWorld`, enter hashes/snapshots/replay, or run inside the headless benchmark measurement. Automated Player screenshots accept `-swarmCapturePath <path>` and `-swarmCaptureView <Overview|Navigation|Avoidance|Collision|Rollback|Network>`.
 
-## 9. Read benchmark evidence correctly
+## 10. Read benchmark evidence correctly
 
 The tracked default and spatial-matrix JSON files contain workload, execution policy, timing, current-thread allocation, navigation counters, obstacle/Agent lines, BVH counters, CCD/fallback counters, motion-limit counters and hashes.
 
@@ -171,13 +191,13 @@ The following conclusions are intentionally excluded:
 
 See [`BENCHMARKING.md`](BENCHMARKING.md) for commands and field definitions.
 
-## 10. Inspect presentation and delivery boundaries
+## 11. Inspect presentation and delivery boundaries
 
 `SwarmIndirectRenderer` uploads all Agent data and uses one Agent indirect draw command. It does not yet build a GPU-visible index list or perform Hi-Z/HLOD.
 
 YooAsset and HybridCLR are isolated behind runtime/editor integration points. Their pinned packages and configuration are present, while installer, IL2CPP, bundle/CDN and rollback verification remain a separate delivery pipeline. See [`COMMERCIAL_PIPELINE.md`](COMMERCIAL_PIPELINE.md).
 
-## 11. Run the complete local suite
+## 12. Run the complete local suite
 
 ```bash
 mkdir -p TestResults

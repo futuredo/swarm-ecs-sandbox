@@ -6,6 +6,30 @@ This file records verifiable public changes. Unreleased work remains under `Unre
 
 - No entries.
 
+## [0.4.0] - 2026-07-15
+
+### Added
+
+- Real IPv4 UDP session with one headless authoritative Player and two independent predictive clients.
+- Explicit little-endian packet envelope, CRC32, unsigned serial arithmetic, ACK bitmap, fixed reliable retransmission windows and ordered request/authority buffers.
+- Compatibility handshake for protocol, logic/config, Q16.16, Agent/seed and replay/snapshot/authority schemas.
+- Main-thread-only command/rollback reconciliation behind a fixed-capacity socket-thread handoff queue.
+- Non-reliable authority hash telemetry with replay-time speculative hash replacement and confirmed-tick diagnostics.
+- Deterministic latency, jitter, loss, duplication and reorder scheduler plus RTT, bandwidth, retransmission, rollback percentile and capacity telemetry.
+- Automated three-process qualification script and tracked machine-readable network evidence.
+
+### Changed
+
+- `RollbackController` exposes snapshot availability/earliest-restorable tick and an optional read-only step observer for network hash reconciliation.
+- Headless network roles suppress the normal scene simulation/presentation host.
+
+### Evidence boundary
+
+- The tracked network workload uses three macOS Mono Player processes, 512 Agents per world and 210 ticks; it is a protocol/convergence qualification, not a 10,000-Agent rendered benchmark or 30-minute soak.
+- Weak-network decisions are deterministic for a fixed scheduling call order; operating-system timing can change the server tick assigned to a request across independent runs.
+- CRC is corruption detection, not authentication. Internet services, encryption, NAT traversal and congestion control are excluded.
+- Out-of-window commands enter `SnapshotRequired`; full/delta snapshot repair and reconnect remain v0.5 scope.
+
 ## [0.3.1] - 2026-07-15
 
 ### Added

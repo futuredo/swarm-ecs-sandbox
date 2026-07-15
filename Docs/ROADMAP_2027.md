@@ -9,7 +9,7 @@ v0.2.1  Navigation completeness
   → v0.2.2  Static avoidance and continuous collision safety
   → v0.3.0  Versioned replay and desync diagnostics
   → v0.3.1  Interactive technical lab and runtime observability
-  → v0.4    Authoritative UDP session with two clients
+  → v0.4.0  Authoritative UDP session with two clients
   → v0.5    Reconnect, snapshots and state repair
   → v0.6    Long-run performance and stability matrix
   → v0.7    GPU visibility and LOD
@@ -66,27 +66,26 @@ This version provides the mechanism for cross-process evidence. A complete Mono/
 
 This patch changes observability and presentation only. Diagnostic buffers, Unity `float` conversion and GL overlays remain outside authority hashes, snapshots, replay payloads and headless benchmark timing.
 
-## 3. v0.4 — Authoritative UDP session
+### v0.4.0 — Authoritative UDP session
 
 Initial scope is loopback/LAN and excludes account, matchmaking, NAT traversal and anti-cheat services.
 
-### Implementation scope
+- One headless authority and two independent Player clients communicate through real IPv4 UDP sockets.
+- The 44-byte envelope carries protocol/session/peer IDs, sequence, ack/ackBits, tick, channel, length and header/payload CRC32.
+- Fixed-capacity retransmission and receive windows provide reliable packets; authority/request buffers provide application command ordering.
+- Clients expose predicted/confirmed tick, input delay, prediction lead, rollback count/depth percentiles and received hash confirmation.
+- A receive thread validates/copies datagrams into a fixed queue and has no `SwarmWorld` reference; the main thread owns message interpretation, command application and rollback.
+- Handshake validation covers protocol, logic/config identity, Q16.16 format, Agent/seed input and replay/snapshot/authority schema versions.
+- The deterministic impairment scheduler injects latency, jitter, loss, duplication and reorder before real socket send.
+- Unsigned half-range serial arithmetic and ACK bitmap wraparound have focused tests.
+- An expired authority command enters explicit `SnapshotRequired`; full repair is not silently approximated.
+- `Scripts/run-authoritative-udp-session.sh` launches and verifies three distinct processes. The tracked 210-tick run preserves raw reports and convergence evidence.
 
-- One headless authoritative session server and two independent clients.
-- Packet header with protocol/session/peer IDs, sequence, ack/ackBits, tick, channel, length and CRC.
-- Reliable ordered commands; non-reliable hash telemetry where appropriate.
-- Client predicted/confirmed tick, input delay, prediction lead and rollback depth.
-- A fixed-capacity network-to-simulation queue; network threads never mutate `SwarmWorld`.
-- Handshake validation for protocol, logic, config, fixed-point, replay and snapshot schema versions.
-- Built-in latency, jitter, loss, duplication and reorder simulation.
-- Sequence epoch or tested serial-number arithmetic for long-running wraparound.
+The runner accepts 54,000 ticks for a 30-minute real-time soak. The tracked short qualification is not reported as long-run stability evidence; soak matrices and platform/backend expansion remain part of the v0.6 evidence phase.
 
-### Acceptance targets
+## 3. Current release boundary
 
-- Automated `1 server + 2 clients` launch and a 30-minute weak-network run.
-- Matching authority hashes at every confirmed tick.
-- Report RTT, bandwidth, prediction lead and rollback depth P50/P95/P99.
-- A command outside the rollback window enters an explicit `SnapshotRequired` state.
+v0.4 implements real transport, server arbitration, prediction and rollback convergence for loopback/LAN validation. It is not an internet session service: authentication, encryption, matchmaking, NAT traversal, congestion control, snapshot transfer and reconnect are excluded.
 
 ## 4. v0.5 — Reconnect and state repair
 

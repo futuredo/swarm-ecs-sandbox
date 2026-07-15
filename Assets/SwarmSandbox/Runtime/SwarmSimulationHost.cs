@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using SwarmECS.FixedPoint;
+using SwarmECS.Runtime.Networking;
 using SwarmECS.Runtime.Rendering;
 using SwarmECS.Simulation;
 using SwarmECS.Simulation.Netcode;
@@ -87,6 +88,12 @@ namespace SwarmECS.Runtime
 
         private void Awake()
         {
+            if (SwarmUdpSessionBootstrap.IsNetworkProcessRequested)
+            {
+                enabled = false;
+                return;
+            }
+
             QualitySettings.vSyncCount = 0;
             Application.targetFrameRate = 120;
             Application.runInBackground = true;

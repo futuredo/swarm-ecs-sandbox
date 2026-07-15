@@ -1,5 +1,6 @@
 using System.Text;
 using SwarmECS.Simulation;
+using SwarmECS.Simulation.Netcode.Transport;
 using SwarmECS.Simulation.Pathfinding;
 using SwarmECS.Simulation.Systems;
 using UnityEngine;
@@ -9,17 +10,18 @@ namespace SwarmECS.Runtime
     [RequireComponent(typeof(SwarmSimulationHost))]
     public sealed class SwarmDebugHud : MonoBehaviour
     {
-        private const float LeftPanelWidth = 438f;
+        private const float LeftPanelWidth = 518f;
         private const float ContextPanelWidth = 360f;
         private const float LogicBudgetMilliseconds = 1000f / 30f;
 
         private static readonly string[] ViewLabels =
         {
             "OVERVIEW",
-            "NAVIGATION",
-            "AVOIDANCE",
+            "NAV",
+            "AVOID",
             "COLLISION",
             "ROLLBACK",
+            "NETWORK",
         };
 
         private const string OverviewContext =
@@ -61,6 +63,14 @@ namespace SwarmECS.Runtime
             "<color=#FF3DB8>MAGENTA</color> predicted positions before correction\n" +
             "<color=#24F2FF>CYAN</color> corrected positions after replay\n\n" +
             "The hashes and sampled ghost links are diagnostics; the authoritative result remains the fixed-point world after replay.";
+
+        private const string NetworkContext =
+            "AUTHORITATIVE UDP LAB\n\n" +
+            "The normal interactive scene runs one local World. The v0.4 qualification launches one headless authority and two predictive clients as separate Player processes over real UDP.\n\n" +
+            "<color=#72E6FF>RELIABLE</color> handshake and ordered commands\n" +
+            "<color=#FFE329>UNRELIABLE</color> authority hash telemetry\n" +
+            "<color=#FF3DB8>ROLLBACK</color> speculative state correction\n\n" +
+            "Run Scripts/run-authoritative-udp-session.sh to reproduce the tracked three-process evidence.";
 
         private readonly StringBuilder _builder = new(1536);
         private SwarmSimulationHost _host;
@@ -108,6 +118,10 @@ namespace SwarmECS.Runtime
             {
                 SetActiveView(SwarmLabView.Rollback);
             }
+            else if (Input.GetKeyDown(KeyCode.Alpha6))
+            {
+                SetActiveView(SwarmLabView.Network);
+            }
         }
 
         private void OnGUI()
@@ -126,7 +140,7 @@ namespace SwarmECS.Runtime
             GUI.Label(new Rect(30f, 25f, LeftPanelWidth - 34f, 30f), "SWARM ECS TECHNICAL LAB", _titleStyle);
             GUI.Label(
                 new Rect(30f, 53f, LeftPanelWidth - 34f, 22f),
-                "10,000-AGENT DETERMINISTIC SIMULATION · v0.3.1 LAB",
+                "10,000-AGENT DETERMINISTIC SIMULATION · v0.4.0 LAB",
                 _subtitleStyle);
 
             DrawViewTabs(panel);
@@ -138,7 +152,7 @@ namespace SwarmECS.Runtime
 
             GUI.Label(
                 new Rect(30f, panel.yMax - 34f, LeftPanelWidth - 32f, 20f),
-                "1-5 lab views | SPACE pause | L rollback | T catch-up | K query | R reset",
+                "1-6 lab views | SPACE pause | L rollback | T catch-up | K query | R reset",
                 _footerStyle);
 
             if (Screen.width >= 980)
@@ -149,7 +163,7 @@ namespace SwarmECS.Runtime
 
         public void SetActiveView(SwarmLabView view)
         {
-            if ((uint)view > (uint)SwarmLabView.Rollback)
+            if ((uint)view > (uint)SwarmLabView.Network)
             {
                 return;
             }
@@ -263,6 +277,9 @@ namespace SwarmECS.Runtime
                 case SwarmLabView.Rollback:
                     _host.InjectLateCorrection();
                     break;
+                case SwarmLabView.Network:
+                    _host.InjectLateCorrection();
+                    break;
                 default:
                     _host.ToggleSpatialIndex();
                     break;
@@ -277,6 +294,7 @@ namespace SwarmECS.Runtime
                 SwarmLabView.Avoidance => "SAMPLE NEXT GROUP",
                 SwarmLabView.Collision => "CLEAR LIVE CCD TRACES",
                 SwarmLabView.Rollback => "INJECT 18-TICK LATE COMMAND",
+                SwarmLabView.Network => "EXERCISE SHARED ROLLBACK CORE",
                 _ => "CYCLE SPATIAL QUERY MODE",
             };
         }
@@ -289,6 +307,7 @@ namespace SwarmECS.Runtime
                 SwarmLabView.Avoidance => AvoidanceContext,
                 SwarmLabView.Collision => CollisionContext,
                 SwarmLabView.Rollback => RollbackContext,
+                SwarmLabView.Network => NetworkContext,
                 _ => OverviewContext,
             };
         }
@@ -314,6 +333,9 @@ namespace SwarmECS.Runtime
                     break;
                 case SwarmLabView.Rollback:
                     AppendRollbackMetrics();
+                    break;
+                case SwarmLabView.Network:
+                    AppendNetworkMetrics();
                     break;
                 default:
                     AppendOverviewMetrics();
@@ -356,6 +378,36 @@ namespace SwarmECS.Runtime
             _builder.Append("Rollback / replay ticks  ")
                 .Append(_host.Rollback.RollbackCount).Append(" / ")
                 .Append(_host.Rollback.LastResimulatedTicks).Append('\n');
+        }
+
+        private void AppendNetworkMetrics()
+        {
+            _builder.Append("PROCESS TOPOLOGY\n");
+            _builder.Append("Interactive mode  1 local World (presentation lab)\n");
+            _builder.Append("Qualification     1 authority + 2 predictive clients\n");
+            _builder.Append("Transport         real IPv4 UDP, loopback / LAN scope\n\n");
+
+            _builder.Append("PACKET CONTRACT\n");
+            _builder.Append("Protocol / header  ")
+                .Append(SwarmUdpPacketCodec.ProtocolVersion).Append(" / ")
+                .Append(SwarmUdpPacketCodec.HeaderSize).Append(" bytes\n");
+            _builder.Append("Max datagram       ").Append(SwarmUdpPacketCodec.MaxDatagramBytes).Append(" bytes\n");
+            _builder.Append("Sequencing         uint32 serial + ACK / 32-bit history\n");
+            _builder.Append("Reliable           handshake + ordered commands\n");
+            _builder.Append("Unreliable         per-tick authority hash telemetry\n");
+            _builder.Append("Integrity          header + payload CRC32\n\n");
+
+            _builder.Append("PREDICTION / REPAIR\n");
+            _builder.Append("Default input delay / lead  2 / 6 ticks\n");
+            _builder.Append("Late command       restore + canonical replay\n");
+            _builder.Append("Expired command    SnapshotRequired (v0.5 repair)\n");
+            _builder.Append("Local rollback count / depth  ")
+                .Append(_host.Rollback.RollbackCount).Append(" / ")
+                .Append(_host.Rollback.LastResimulatedTicks).Append(" ticks\n\n");
+
+            _builder.Append("REPRODUCTION\n");
+            _builder.Append("Scripts/run-authoritative-udp-session.sh\n");
+            _builder.Append("NetworkResults/latest/{server,client-1,client-2}.json\n");
         }
 
         private void AppendNavigationMetrics()

@@ -7,5 +7,6 @@ namespace SwarmECS.Runtime
         Avoidance = 2,
         Collision = 3,
         Rollback = 4,
+        Network = 5,
     }
 }
