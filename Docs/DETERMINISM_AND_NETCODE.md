@@ -156,11 +156,34 @@ Recommended cross-process procedure:
 4. Repeat on each runtime/architecture that will be named in the compatibility matrix.
 5. On a mismatch, identify the first checkpoint and run the layered field diff on the corresponding restored states.
 
-## 8. Catch-up
+## 8. Authoritative UDP session
+
+v0.4 wraps the same command timeline and rollback controller in one headless authority and two predictive clients. The server alone assigns canonical command tick/sequence. Clients never reconstruct these values from packet arrival time.
+
+The 44-byte explicit little-endian envelope carries session/peer identity, packet sequence, ack/ackBits, sender tick, channel, flags, length and CRC32. A fixed retransmission window provides reliable control/command delivery; separate fixed request/authority buffers release application commands in canonical order. Unsigned packet/request sequences use tested half-range serial comparison.
+
+```mermaid
+flowchart LR
+    A["UDP receive thread"] -->|"validate + fixed copy"| B["Datagram queue"]
+    B --> C["Main-thread decoder"]
+    C --> D["Ordered authority commands"]
+    D --> E["RollbackController"]
+    E --> F["Predicted World"]
+    F --> G["Tick hash history"]
+    H["Server hash telemetry"] --> G
+```
+
+The receive worker has no reference to `SwarmWorld`. Only the main thread drains the queue, applies server commands and replays simulation. `NetworkAuthorityHashHistory` records local and server values by tick; the rollback step observer rewrites speculative local samples during re-simulation. Every server sample actually received must end as confirmed. Telemetry lost by the impairment layer is intentionally not retransmitted.
+
+The compatibility handshake rejects mismatched packet protocol, simulation logic/config, Q16.16 fractional bits, Agent/seed input or replay/snapshot/authority schema. CRC is accidental-corruption detection, not authentication.
+
+When a late command's snapshot is missing, reconciliation enters `SnapshotRequired` and reports command/current/earliest-restorable ticks. v0.4 does not clamp the origin or mutate the confirmed state with a partial repair. See [`PROTOCOL_v0.4.md`](PROTOCOL_v0.4.md) for the complete wire and state-machine contract.
+
+## 9. Catch-up
 
 `QueueCatchUp(600)` models a logic backlog. The Host advances a bounded number of ticks per presentation frame and suppresses intermediate GPU upload/draw until caught up. This verifies simulation/presentation separation, not network download, full-snapshot deserialization or confirmed-tick protocol behavior.
 
-## 9. Evidence levels
+## 10. Evidence levels
 
 Evidence should be recorded at increasing strength:
 
@@ -168,19 +191,19 @@ Evidence should be recorded at increasing strength:
 2. on-time command versus late command plus rollback;
 3. serialized replay executed by two independent processes on one backend;
 4. the same replay across Mono/IL2CPP and ARM64/x64 targets;
-5. long-running lane-count and weak-network matrices.
+5. three independent Player processes over real UDP with weak-network rollback convergence;
+6. long-running backend, architecture, lane-count and weak-network matrices.
 
 Only completed levels with raw artifacts bound to a source commit should be reported. A matching final hash alone cannot show where an earlier transient divergence occurred, which is why checkpoint streams and field-level diagnostics are retained.
 
-## 10. Current network boundary
+## 11. Current network boundary
 
-The repository contains a deterministic command timeline, bounded rollback, catch-up, versioned replay and diagnostics. It does not yet include:
+The repository contains real UDP transport, acknowledgements/retransmission, authority arbitration, bounded client prediction, late-command rollback and received-tick hash confirmation. It does not yet include:
 
-- UDP/KCP transport, acknowledgements, retransmission or clock synchronization;
-- authoritative server arbitration and input confirmation;
+- authenticated/encrypted internet transport, NAT traversal, congestion control or production clock discipline;
 - out-of-window full/delta snapshot transfer, fragmentation or repair;
 - disconnect/reconnect session state;
 - dynamic map topology serialization;
-- a completed Mono/IL2CPP and ARM64/x64 evidence matrix.
+- a completed Mono/IL2CPP and ARM64/x64 evidence matrix or tracked 30-minute soak.
 
 The ordered next steps and acceptance gates are defined in [`ROADMAP_2027.md`](ROADMAP_2027.md).

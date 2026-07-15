@@ -408,6 +408,107 @@ jobs:
                   raise SystemExit(f"Replay latest.md is missing value {value}.")
           PY
 
+      - name: Validate tracked authoritative UDP evidence
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          root = Path("NetworkResults/latest")
+          report_paths = {
+              "server": root / "server.json",
+              "client1": root / "client-1.json",
+              "client2": root / "client-2.json",
+          }
+          summary_path = root / "summary.json"
+          markdown_path = root / "latest.md"
+          required_paths = (*report_paths.values(), summary_path, markdown_path)
+          missing = [str(path) for path in required_paths if not path.is_file()]
+          if missing:
+              raise SystemExit(f"Tracked UDP evidence is missing: {missing}")
+
+          reports = {
+              name: json.loads(path.read_text(encoding="utf-8"))
+              for name, path in report_paths.items()
+          }
+          summary = json.loads(summary_path.read_text(encoding="utf-8"))
+          server = reports["server"]
+          clients = (reports["client1"], reports["client2"])
+          hash_pattern = re.compile(r"^0x[0-9A-F]{16}$")
+
+          if server.get("version") != "0.4.0" or summary.get("version") != "0.4.0":
+              raise SystemExit("UDP evidence version must be 0.4.0.")
+          if server.get("role") != "server" or server.get("peerId") != 0:
+              raise SystemExit("UDP server report has an invalid identity.")
+          if [client.get("peerId") for client in clients] != [1, 2]:
+              raise SystemExit("UDP client reports must contain peers 1 and 2.")
+          if any(client.get("role") != "client" for client in clients):
+              raise SystemExit("UDP client report has an invalid role.")
+          if len({report.get("processId") for report in reports.values()}) != 3:
+              raise SystemExit("UDP evidence must retain three distinct process IDs.")
+
+          common_fields = (
+              "sessionId", "logicHash", "configHash", "finalStateHash",
+              "authorityFinalStateHash", "authorityCommands", "finalTick",
+              "agentCount", "seed", "inputDelayTicks", "predictionLeadTicks",
+          )
+          for field in common_fields:
+              values = {report.get(field) for report in reports.values()}
+              if len(values) != 1:
+                  raise SystemExit(f"UDP evidence {field} mismatch: {values}")
+          for report in reports.values():
+              if report.get("success") is not True:
+                  raise SystemExit(f"UDP process failed: {report.get('failure')}")
+              for field in ("logicHash", "configHash", "finalStateHash", "authorityFinalStateHash"):
+                  if not hash_pattern.fullmatch(str(report.get(field, ""))):
+                      raise SystemExit(f"UDP report has invalid {field}.")
+              if report.get("inboundQueueDrops") != 0 or report.get("weakCapacityDrops") != 0:
+                  raise SystemExit("UDP evidence overflowed a bounded queue.")
+              if report.get("socketErrors") != 0 or report.get("rejectedDatagrams") != 0:
+                  raise SystemExit("UDP evidence contains transport errors.")
+              if report.get("pendingReliablePackets") != 0:
+                  raise SystemExit("UDP process exited with pending reliable packets.")
+
+          if server.get("authorityCommands") != 4 or server.get("finalTick") != 210:
+              raise SystemExit("Tracked UDP workload must contain four commands through tick 210.")
+          for client in clients:
+              if client.get("receivedAuthorityCommands") != 4:
+                  raise SystemExit("UDP client did not receive all authority commands.")
+              if client.get("lateAuthorityCommands", 0) <= 0 or client.get("rollbackCount", 0) <= 0:
+                  raise SystemExit("UDP client did not exercise late-command rollback.")
+              if client.get("unresolvedHashMismatches") != 0 or client.get("missingLocalHashSamples") != 0:
+                  raise SystemExit("UDP client retained unresolved authority hashes.")
+              if client.get("confirmedHashSamples") != client.get("serverHashSamples") or \
+                      client.get("serverHashSamples", 0) <= 0:
+                  raise SystemExit("UDP client did not confirm every received authority hash.")
+
+          summary_fields = {
+              "processCount": 3,
+              "agentsPerWorld": server["agentCount"],
+              "finalTick": server["finalTick"],
+              "authorityCommands": server["authorityCommands"],
+              "logicHash": server["logicHash"],
+              "configHash": server["configHash"],
+              "finalStateHash": server["finalStateHash"],
+          }
+          for field, expected in summary_fields.items():
+              if summary.get(field) != expected:
+                  raise SystemExit(f"UDP summary {field} does not match process reports.")
+          if summary.get("weakLossDrops", 0) <= 0 or summary.get("weakReorders", 0) <= 0:
+              raise SystemExit("UDP evidence must exercise loss and reordering.")
+          if summary.get("reliableRetransmissions", 0) <= 0:
+              raise SystemExit("UDP evidence must exercise reliable retransmission.")
+          if summary.get("inboundQueueDrops") != 0 or summary.get("socketErrors") != 0:
+              raise SystemExit("UDP summary contains transport failures.")
+
+          markdown = markdown_path.read_text(encoding="utf-8")
+          for value in (summary["logicHash"], summary["configHash"], summary["finalStateHash"]):
+              if value not in markdown:
+                  raise SystemExit(f"UDP latest.md is missing {value}.")
+          PY
+
       - name: Validate release documentation
         shell: bash
         run: |
@@ -419,15 +520,18 @@ jobs:
           test -f Docs/ARCHITECTURE.md
           test -f Docs/DETERMINISM_AND_NETCODE.md
           test -f Docs/TECHNICAL_WALKTHROUGH.md
-          test -f Docs/RELEASE_NOTES_v0.3.1.md
+          test -f Docs/PROTOCOL_v0.4.md
+          test -f Docs/RELEASE_NOTES_v0.4.0.md
           test -f Docs/COMMERCIAL_PIPELINE.md
           test -f THIRD_PARTY_NOTICES.md
           test -f LICENSES/Apache-2.0.txt
-          grep -q '^  bundleVersion: 0.3.1$' ProjectSettings/ProjectSettings.asset
+          grep -q '^  bundleVersion: 0.4.0$' ProjectSettings/ProjectSettings.asset
           test -x Scripts/run-spatial-index-benchmark-matrix.sh
           test -x Scripts/run-cross-process-replay.sh
+          test -x Scripts/run-authoritative-udp-session.sh
           bash -n Scripts/run-spatial-index-benchmark-matrix.sh
           bash -n Scripts/run-cross-process-replay.sh
+          bash -n Scripts/run-authoritative-udp-session.sh
 
       - name: Validate Unity metadata and public repository hygiene
         shell: bash
@@ -561,6 +665,11 @@ jobs:
             ReplayResults/capture.json
             ReplayResults/verify.json
             ReplayResults/latest.md
+            NetworkResults/latest/server.json
+            NetworkResults/latest/client-1.json
+            NetworkResults/latest/client-2.json
+            NetworkResults/latest/summary.json
+            NetworkResults/latest/latest.md
             ProjectSettings/ProjectVersion.txt
             README.md
             CHANGELOG.md
@@ -568,14 +677,16 @@ jobs:
             LICENSES/Apache-2.0.txt
             Docs/ARCHITECTURE.md
             Docs/DETERMINISM_AND_NETCODE.md
+            Docs/PROTOCOL_v0.4.md
             Docs/ROADMAP_2027.md
             Docs/RELEASE_CHECKLIST.md
-            Docs/RELEASE_NOTES_v0.3.1.md
+            Docs/RELEASE_NOTES_v0.4.0.md
             Docs/TECHNICAL_WALKTHROUGH.md
             Docs/BENCHMARKING.md
             Docs/COMMERCIAL_PIPELINE.md
             Scripts/run-spatial-index-benchmark-matrix.sh
             Scripts/run-cross-process-replay.sh
+            Scripts/run-authoritative-udp-session.sh
           if-no-files-found: error
           retention-days: 30
 

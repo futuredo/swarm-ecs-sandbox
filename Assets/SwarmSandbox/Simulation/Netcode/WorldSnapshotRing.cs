@@ -10,6 +10,8 @@ namespace SwarmECS.Simulation.Netcode
 /// </summary>
 public sealed class WorldSnapshotRing
 {
+    public const ushort CurrentSchemaVersion = 1;
+
     private readonly int _agentCapacity;
     private readonly int _historyLength;
     private readonly int[] _ticks;

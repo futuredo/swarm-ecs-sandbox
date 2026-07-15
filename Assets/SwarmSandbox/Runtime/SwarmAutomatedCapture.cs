@@ -141,7 +141,7 @@ namespace SwarmECS.Runtime
         {
             string value = ReadArgument("-swarmCaptureView");
             return Enum.TryParse(value, true, out SwarmLabView view) &&
-                (uint)view <= (uint)SwarmLabView.Rollback
+                (uint)view <= (uint)SwarmLabView.Network
                 ? view
                 : SwarmLabView.Overview;
         }
