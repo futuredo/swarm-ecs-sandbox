@@ -4,7 +4,15 @@ This file records verifiable public changes. Unreleased work remains under `Unre
 
 ## [Unreleased]
 
-- No entries.
+### Added
+
+- English / Simplified Chinese runtime localization across all six Technical Lab pages, metrics, controls, context explanations and world-space labels.
+- Persistent language selection through the HUD or `F1`, plus deterministic Player capture language selection for visual validation.
+- A capability-oriented Technical Lab guide covering interactive walkthroughs and reproducible test, replay and UDP evidence paths.
+
+### Evidence boundary
+
+- Localization remains presentation-only and does not enter authoritative state, configuration/state hashes, snapshots, replay or network protocol data.
 
 ## [0.4.0] - 2026-07-15
 

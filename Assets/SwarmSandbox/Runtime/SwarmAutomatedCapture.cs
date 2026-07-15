@@ -17,6 +17,7 @@ namespace SwarmECS.Runtime
 
         private SwarmSimulationHost _host;
         private SwarmLabView _requestedView;
+        private SwarmUiLanguage _requestedLanguage;
         private string _capturePath;
         private float _captureTime;
         private bool _viewConfigured;
@@ -37,6 +38,7 @@ namespace SwarmECS.Runtime
             SwarmAutomatedCapture capture = gameObject.AddComponent<SwarmAutomatedCapture>();
             capture._capturePath = Path.GetFullPath(path);
             capture._requestedView = ReadLabViewArgument();
+            capture._requestedLanguage = ReadLanguageArgument();
         }
 
         private void Update()
@@ -80,6 +82,7 @@ namespace SwarmECS.Runtime
                 return;
             }
 
+            hud.SetLanguage(_requestedLanguage, false);
             hud.SetActiveView(_requestedView);
             switch (_requestedView)
             {
@@ -92,7 +95,7 @@ namespace SwarmECS.Runtime
             }
 
             _viewConfigured = true;
-            Debug.Log($"[SwarmECS] Capture view configured: {_requestedView}");
+            Debug.Log($"[SwarmECS] Capture view configured: {_requestedView}, language: {_requestedLanguage}");
         }
 
         private IEnumerator CaptureAtEndOfFrame()
@@ -144,6 +147,15 @@ namespace SwarmECS.Runtime
                 (uint)view <= (uint)SwarmLabView.Network
                 ? view
                 : SwarmLabView.Overview;
+        }
+
+        private static SwarmUiLanguage ReadLanguageArgument()
+        {
+            string value = ReadArgument("-swarmCaptureLanguage");
+            return Enum.TryParse(value, true, out SwarmUiLanguage language) &&
+                (language == SwarmUiLanguage.English || language == SwarmUiLanguage.SimplifiedChinese)
+                ? language
+                : SwarmUiLanguage.English;
         }
 
         private static int CaptureTickForView(SwarmLabView view)

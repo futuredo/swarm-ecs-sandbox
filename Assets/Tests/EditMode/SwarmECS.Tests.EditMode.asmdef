@@ -3,7 +3,8 @@
   "rootNamespace": "SwarmECS.Tests",
   "references": [
     "SwarmECS.Core",
-    "SwarmECS.Simulation"
+    "SwarmECS.Simulation",
+    "SwarmECS.Runtime"
   ],
   "includePlatforms": [
     "Editor"
