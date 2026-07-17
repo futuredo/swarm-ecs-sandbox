@@ -174,7 +174,7 @@ namespace SwarmECS.Runtime
                     {
                         DrawWorldLabel(
                             _host.World.GroupTargets[group],
-                            "G" + group + " TARGET",
+                            "G" + group + (_hud.IsChinese ? " 目标" : " TARGET"),
                             GroupColors[group]);
                     }
                     break;
@@ -183,20 +183,23 @@ namespace SwarmECS.Runtime
                     {
                         DrawWorldLabel(
                             _host.World.Positions[SelectedAgentId],
-                            "SAMPLE #" + SelectedAgentId,
+                            (_hud.IsChinese ? "采样 #" : "SAMPLE #") + SelectedAgentId,
                             SolvedVelocityColor);
                     }
                     break;
                 case SwarmLabView.Collision:
                     if (CollisionProbeHit)
                     {
-                        DrawWorldLabel(_probeImpact, "CCD TOI", CcdImpactColor);
+                        DrawWorldLabel(_probeImpact, _hud.IsChinese ? "CCD 碰撞时刻" : "CCD TOI", CcdImpactColor);
                     }
                     break;
                 case SwarmLabView.Rollback:
                     if (_host.RollbackGhostCount == 0)
                     {
-                        DrawWorldLabel(FPVector2.Zero, "PRESS L / LATE CMD", RollbackAfterColor);
+                        DrawWorldLabel(
+                            FPVector2.Zero,
+                            _hud.IsChinese ? "按 L / 注入迟到命令" : "PRESS L / LATE CMD",
+                            RollbackAfterColor);
                     }
                     break;
             }

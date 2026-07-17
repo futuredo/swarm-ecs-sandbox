@@ -56,7 +56,7 @@ flowchart LR
 - **Authoritative UDP session**：一个 headless Server 与两个独立 Client；44-byte 显式小端 packet header、CRC32、32-bit serial arithmetic、ack/ackBits、可靠重传、应用层命令顺序、输入延迟、prediction lead、逐 tick hash 确认和 `SnapshotRequired` 失败状态。Socket 线程只向固定容量队列复制数据报，不能访问 `SwarmWorld`。
 - **Deterministic weak network**：在真实 socket send 前注入可复现的 latency、jitter、loss、duplication 与 reorder；固定容量调度器记录丢包、重复、乱序、容量溢出、RTT、带宽和重传数据。
 - **Versioned replay and diagnostics**：`.swarmreplay` 固定字节序、显式 schema/config/logic 信息、命令与 checkpoint、完整性校验、有界执行预算、O(N) 规范命令装载与顺序播放；分层权威哈希可进一步定位到 component、entity/group、field 与 raw value。
-- **Interactive technical lab**：Overview / Navigation / Avoidance / Collision / Rollback / Network 六页分层 HUD；世界空间显示真实共享路线、阻塞节点、采样邻居、ORCA 速度约束、BVH bounds、CCD contact/slide 与 rollback ghost，Network 页明确区分本地交互 World 和外部三进程资格验证。覆盖层使用 caller-owned/fixed-capacity 诊断缓冲，不写回权威 World。
+- **Interactive technical lab**：Overview / Navigation / Avoidance / Collision / Rollback / Network 六页分层 HUD；支持 English / 简体中文全局切换并持久化本机选择；世界空间显示真实共享路线、阻塞节点、采样邻居、ORCA 速度约束、BVH bounds、CCD contact/slide 与 rollback ghost，Network 页明确区分本地交互 World 和外部三进程资格验证。覆盖层与语言状态不写回权威 World。
 - **Indirect rendering**：CPU 上传 Agent 结构化数据，Unity 6 `Graphics.RenderMeshIndirect` 以一个 Agent indirect command 绘制；没有逐 Agent GameObject。
 - **Commercial integration boundary**：工程固定 YooAsset 3.0.4 与 HybridCLR 8.12.0，并提供程序集、资源收集与加载边界；目标平台发布闭环仍需独立验收。
 
@@ -77,6 +77,9 @@ flowchart LR
 1. 使用 **Unity 6000.3.9f1** 打开工程。
 2. 打开 `Assets/Scenes/SwarmSandbox.unity` 并进入 Play Mode。
 3. 从 HUD 观察 logic tick、CPU/tick、路径预算、空间查询、ORCA、CCD、限幅、状态哈希和 rollback。
+4. 点击左上角 `中文` / `EN` 或按 `F1`，全局切换六个页面、操作按钮、说明文本和世界空间标注的语言。
+
+完整的能力映射、8–10 分钟演示顺序和命令行复现入口见 [`Docs/DEMO_GUIDE.md`](Docs/DEMO_GUIDE.md)。
 
 技术实验页可通过 HUD 标签或数字键切换：
 
@@ -92,6 +95,7 @@ flowchart LR
 | Key | Action |
 |---|---|
 | `Space` | 暂停 / 继续 |
+| `F1` | English / 简体中文全局切换 |
 | `L` | 注入延迟 18 tick 的群组目标命令并回滚重演 |
 | `T` | 加入 600 tick 追帧积压；期间跳过中间渲染 |
 | `K` | 循环 `Uniform Grid radius → KD-Tree radius → KD-Tree exact KNN`，以权威命令切换 |
@@ -188,6 +192,7 @@ Assets/SwarmSandbox/
 - [`Docs/DETERMINISM_AND_NETCODE.md`](Docs/DETERMINISM_AND_NETCODE.md)：确定性契约、snapshot、replay 与 desync diagnostics
 - [`Docs/PROTOCOL_v0.4.md`](Docs/PROTOCOL_v0.4.md)：UDP envelope、可靠性、握手、Server/Client 状态机和线程边界
 - [`Docs/TECHNICAL_WALKTHROUGH.md`](Docs/TECHNICAL_WALKTHROUGH.md)：架构审阅路径与复现实验
+- [`Docs/DEMO_GUIDE.md`](Docs/DEMO_GUIDE.md)：能力映射、交互演示顺序、双语界面和证据复现入口
 - [`Docs/BENCHMARKING.md`](Docs/BENCHMARKING.md)：基准入口、输出字段与解释边界
 - [`Docs/ROADMAP_2027.md`](Docs/ROADMAP_2027.md)：后续版本顺序与量化门禁
 - [`Docs/COMMERCIAL_PIPELINE.md`](Docs/COMMERCIAL_PIPELINE.md)：YooAsset + HybridCLR 当前接入范围
